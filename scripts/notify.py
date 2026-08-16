@@ -13,14 +13,19 @@ TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 
 
 def format_pick(r) -> str:
+    """
+    「売り目安」は空売りの新規シグナルではなく、この現物買いで取得した株を
+    いつ手仕舞う（保有株を売却する）かの目安。購入価格より上で手仕舞えれば
+    利益確定、下なら損切りになる（どちらになるかは結果次第）。
+    """
     code = str(r["code"]).replace(".T", "")
     sma5, sma20 = r.get("sma5"), r.get("sma20")
     if sma5 == sma5 and sma20 == sma20:  # NaNでない
-        sell_txt = f"5日線({sma5:.0f})が20日線({sma20:.0f})を下抜けたら利確"
+        sell_txt = f"5日線({sma5:.0f})が20日線({sma20:.0f})を下抜けたら手仕舞い（保有株を売却）"
     else:
         sell_txt = "算出不可"
     return (
-        f"[{code}]{r['name']} 現物買い "
+        f"[{code}]{r['name']} 現物買い（空売りではない）"
         f"購入{r['price']:.0f}円(100株={r['lot_cost']:,.0f}円) "
         f"売り目安:{sell_txt}"
     )

@@ -438,11 +438,13 @@ def sell_timing(row) -> str:
     if pd.isna(row["sma5"]) or pd.isna(row["sma20"]):
         return "データ不足"
 
-    base = f"5日線（{row['sma5']:,.0f}円）が20日線（{row['sma20']:,.0f}円）を下抜けたら利益確定を検討"
+    # 空売りの新規シグナルではなく、現物買いした株を手仕舞う（売却する）タイミングの目安。
+    # 購入価格より上で手仕舞えれば利益確定、下なら損切りになる（結果は状況次第）。
+    base = f"5日線（{row['sma5']:,.0f}円）が20日線（{row['sma20']:,.0f}円）を下抜けたら手仕舞い（保有株の売却）を検討"
 
     buy = row.get("td_buy")
     if buy in (9, 17, 23):
-        base += f" ／ 9の法則が{buy}本目＝利確を強く意識する節目に到達"
+        base += f" ／ 9の法則が{buy}本目＝手仕舞いを強く意識する節目に到達"
     elif pd.notna(buy) and buy >= 6:
         next_checkpoint = 9 if buy < 9 else (17 if buy < 17 else 23)
         base += f" ／ 9の法則は現在{buy}本目（次の節目は{next_checkpoint}本目）"
