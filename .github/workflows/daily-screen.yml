@@ -1,0 +1,28 @@
+name: 株おすすめ通知
+
+on:
+  schedule:
+    - cron: '0 23 * * 0-4'  # UTC 23:00 日〜木 = JST 8:00 月〜金
+  workflow_dispatch: {}
+
+jobs:
+  screen-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run screening
+        run: python3 screen.py
+
+      - name: Send notification
+        if: always()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python3 scripts/notify.py
