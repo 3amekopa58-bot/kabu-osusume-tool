@@ -12,6 +12,20 @@ import urllib.request
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 
 
+def format_pick(r) -> str:
+    code = str(r["code"]).replace(".T", "")
+    sma5, sma20 = r.get("sma5"), r.get("sma20")
+    if sma5 == sma5 and sma20 == sma20:  # NaNでない
+        sell_txt = f"5日線({sma5:.0f})が20日線({sma20:.0f})を下抜けたら利確"
+    else:
+        sell_txt = "算出不可"
+    return (
+        f"[{code}]{r['name']} 現物買い "
+        f"購入{r['price']:.0f}円(100株={r['lot_cost']:,.0f}円) "
+        f"売り目安:{sell_txt}"
+    )
+
+
 def build_message() -> str:
     files = sorted(glob.glob("output/recommend_*.csv"))
     if not files:
@@ -25,17 +39,21 @@ def build_message() -> str:
     for _, r in df.iterrows():
         buy = r.get("buy_timing")
         if isinstance(buy, str) and "買いタイミング" in buy:
-            picks.append(f"{r['name']}({r['price']:.0f}円)")
+            picks.append(format_pick(r))
         if len(picks) >= 3:
             break
 
     if picks:
-        msg = "本日のおすすめ: " + "、".join(picks)
+        msg = "本日のおすすめ（すべて現物買い）\n" + "\n".join(picks)
     else:
         top = df.iloc[0]
-        msg = f"本日は買いシグナルなし。上位候補: {top['name']}({top['price']:.0f}円) {top['trend_label']}"
+        msg = (
+            f"本日は買いシグナルなし。上位候補: "
+            f"[{str(top['code']).replace('.T', '')}]{top['name']}"
+            f"({top['price']:.0f}円) {top['trend_label']}"
+        )
 
-    return msg[:200]
+    return msg
 
 
 def main():
