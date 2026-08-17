@@ -158,6 +158,8 @@ def main():
     trend_filter = "trend" in sys.argv[2:]
     use_market_regime = "market" in sys.argv[2:]
     use_volume_filter = "volume" in sys.argv[2:]
+    period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
+    history_period = period_args[0] if period_args else HISTORY_PERIOD
 
     tickers = load_tickers()
     filter_desc = "PPP3/4以上+100日線上のみ" if trend_filter else "フィルターなし"
@@ -166,12 +168,12 @@ def main():
     if use_volume_filter:
         filter_desc += "+出来高が20日平均の1.5倍以上"
     exit_desc = "5日線が20日線を下抜け（PPP崩れ）" if exit_mode == "ppp_break" else f"{exit_period}日線割れ"
-    print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{HISTORY_PERIOD}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
+    print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
     if use_market_regime:
         print("日経平均のデータを取得中…")
-        market_regime = fetch_market_regime(HISTORY_PERIOD)
+        market_regime = fetch_market_regime(history_period)
 
     all_trades = []
     bh_returns = []
@@ -179,7 +181,7 @@ def main():
     for i, t in enumerate(tickers, 1):
         code, name = t["code"], t["name"]
         try:
-            hist = yf.Ticker(code).history(period=HISTORY_PERIOD)
+            hist = yf.Ticker(code).history(period=history_period)
             if len(hist) < 120:
                 print(f"  [{i}/{len(tickers)}] {name} ({code}) データ不足のためスキップ")
                 continue
@@ -202,7 +204,7 @@ def main():
     OUTPUT_DIR.mkdir(exist_ok=True)
     suffix = ("_trend" if trend_filter else "") + ("_market" if use_market_regime else "") + ("_volume" if use_volume_filter else "")
     tag = "ppp" if exit_mode == "ppp_break" else f"exit{exit_period}"
-    out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{dt.date.today():%Y%m%d}.csv"
+    out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     win_rate = (df["return_pct"] > 0).mean() * 100
