@@ -19,9 +19,9 @@ def format_pick(r) -> str:
     利益確定、下なら損切りになる（どちらになるかは結果次第）。
     """
     code = str(r["code"]).replace(".T", "")
-    sma5, sma20 = r.get("sma5"), r.get("sma20")
-    if sma5 == sma5 and sma20 == sma20:  # NaNでない
-        sell_txt = f"5日線({sma5:.0f})が20日線({sma20:.0f})を下抜けたら手仕舞い（保有株を売却）"
+    sma20 = r.get("sma20")
+    if sma20 == sma20:  # NaNでない
+        sell_txt = f"{sma20:.0f}円を下回ったら手仕舞い（保有株を売却）"
     else:
         sell_txt = "算出不可"
     return (
