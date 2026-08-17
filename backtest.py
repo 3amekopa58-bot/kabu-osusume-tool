@@ -48,6 +48,24 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     return close > sma100
 
 
+def fetch_market_regime_ppp(period: str = "5y", min_matches: int = 3) -> pd.Series:
+    """
+    マーケットレジームフィルターの強化版。「終値が100日線より上」という
+    緩い基準ではなく、日経平均自体にPPP（5>10>20>50>100日線の並び）判定を
+    適用し、min_matches組以上揃っている＝方向感の強い上昇トレンドの日だけを
+    「地合いが良い」と判定する。方向感の乏しい年（レンジ相場）を除外する狙い。
+    """
+    idx = yf.Ticker("^N225").history(period=period)
+    close = idx["Close"]
+    ma_periods = (5, 10, 20, 50, 100)
+    sma = {n: close.rolling(n).mean() for n in ma_periods}
+    matches = sum(
+        (sma[ma_periods[i]] > sma[ma_periods[i + 1]]).astype(int)
+        for i in range(len(ma_periods) - 1)
+    )
+    return matches >= min_matches
+
+
 def backtest_ticker(
     code: str,
     name: str,
@@ -156,14 +174,17 @@ def main():
     exit_mode = "ppp_break" if arg1 == "ppp" else "ma"
     exit_period = 20 if exit_mode == "ppp_break" else int(arg1)
     trend_filter = "trend" in sys.argv[2:]
-    use_market_regime = "market" in sys.argv[2:]
+    use_market_regime = "market" in sys.argv[2:] or "marketppp" in sys.argv[2:]
+    use_market_regime_ppp = "marketppp" in sys.argv[2:]
     use_volume_filter = "volume" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
     tickers = load_tickers()
     filter_desc = "PPP3/4以上+100日線上のみ" if trend_filter else "フィルターなし"
-    if use_market_regime:
+    if use_market_regime_ppp:
+        filter_desc += "+日経平均自体がPPP3/4以上の強いトレンドの日のみ"
+    elif use_market_regime:
         filter_desc += "+日経平均が上昇トレンドの日のみ"
     if use_volume_filter:
         filter_desc += "+出来高が20日平均の1.5倍以上"
@@ -171,7 +192,10 @@ def main():
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
-    if use_market_regime:
+    if use_market_regime_ppp:
+        print("日経平均のデータを取得中（PPP判定）…")
+        market_regime = fetch_market_regime_ppp(history_period)
+    elif use_market_regime:
         print("日経平均のデータを取得中…")
         market_regime = fetch_market_regime(history_period)
 
@@ -202,7 +226,8 @@ def main():
     df = pd.DataFrame(all_trades)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    suffix = ("_trend" if trend_filter else "") + ("_market" if use_market_regime else "") + ("_volume" if use_volume_filter else "")
+    market_suffix = "_marketppp" if use_market_regime_ppp else ("_market" if use_market_regime else "")
+    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "")
     tag = "ppp" if exit_mode == "ppp_break" else f"exit{exit_period}"
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
