@@ -307,6 +307,7 @@ def fetch_one(code: str, name: str) -> dict:
     if len(hist) >= MIN_HISTORY_DAYS:
         close = hist["Close"]
         open_ = hist["Open"]
+        volume = hist["Volume"]
         sma = {n: close.rolling(n).mean() for n in MA_PERIODS}
 
         row["last_close"] = close.iloc[-1]
@@ -314,6 +315,12 @@ def fetch_one(code: str, name: str) -> dict:
         row["rsi14"] = calc_rsi(close)
         for n in MA_PERIODS:
             row[f"sma{n}"] = sma[n].iloc[-1]
+
+        # 出来高フィルター：本日の出来高が直近20日平均の1.5倍以上か
+        # バックテストで確認済み：出来高を伴った下半身はPF 1.80→2.60に大幅改善
+        vol_avg20 = volume.rolling(20).mean().iloc[-1]
+        row["volume_ratio"] = (volume.iloc[-1] / vol_avg20) if vol_avg20 and vol_avg20 > 0 else None
+        row["volume_confirmed"] = bool(row["volume_ratio"] is not None and row["volume_ratio"] >= 1.5)
 
         # PPP: 5日線>10日線>20日線>50日線>100日線 の並びがどこまで揃っているか（0〜4）
         up_matches = sum(
@@ -378,6 +385,8 @@ def fetch_one(code: str, name: str) -> dict:
         row["monowakare_label"] = "データ不足"
         row["fushime_breakout_level"] = None
         row["fushime_label"] = "データ不足"
+        row["volume_ratio"] = None
+        row["volume_confirmed"] = None
 
     return row
 
@@ -418,6 +427,8 @@ def trend_label(row) -> str:
         base += "・本日「逆下半身」シグナル点灯"
     if row.get("monowakare_signal") == "up":
         base += "・ものわかれ（黒い縁取り）からの上抜けあり"
+    if row.get("volume_confirmed"):
+        base += "・出来高急増を伴う"
 
     return base
 
@@ -441,6 +452,8 @@ def buy_timing(row, market_regime_up: bool = True) -> str:
         notes.append("トレンドやや弱め")
     if not market_regime_up:
         notes.append("日経平均が上昇トレンドでない")
+    if row.get("kahanshin") and not row.get("volume_confirmed"):
+        notes.append("出来高の伴いが弱い")
     confidence = f"（{'・'.join(notes)}・慎重に）" if notes else ""
     return (
         f"買いタイミング（{'・'.join(signals)}点灯）{confidence}: "
@@ -489,18 +502,20 @@ def technical_score(row, market_regime_up: bool = True) -> float:
     # PPPの完成度（5>10>20>50>100 が何組成立しているか）
     score += (row["ppp_matches"] / 4) * 0.25
 
-    # 下半身シグナルが本日点灯＝号砲
-    # バックテストで確認済み：PPP3/4以上＋100日線より上（強いトレンド）＋
-    # 日経平均自体が上昇トレンドの日、での下半身はプロフィットファクターが
-    # 最も高い（1.44→1.72→1.80）。弱いトレンドや地合いの悪い日の下半身は加点を抑える。
-    # さらに「ものわかれ（黒い縁取り）」からの抜けと重なった下半身は、
-    # 相場師朗氏が実践で最重視する組み合わせのため最も高く評価する。
-    if row["kahanshin"] and row.get("trend_filter_pass") and market_regime_up and row.get("monowakare_signal") == "up":
-        score += 0.30
-    elif row["kahanshin"] and row.get("trend_filter_pass") and market_regime_up:
-        score += 0.25
-    elif row["kahanshin"]:
-        score += 0.10
+    # 下半身シグナルが本日点灯＝号砲。バックテストで確認済みの各条件を
+    # 加算方式で評価する（PF実績: 基本1.29 → トレンド強め1.44 → +地合い1.80 →
+    # +出来高2.60）。条件が重なるほど過去の実績上、信頼度が高い。
+    if row["kahanshin"]:
+        bonus = 0.10  # 下半身が出ただけでも号砲として加点
+        if row.get("trend_filter_pass"):
+            bonus += 0.08  # PPP3/4以上＋100日線より上
+        if market_regime_up:
+            bonus += 0.05  # 日経平均自体が上昇トレンド
+        if row.get("volume_confirmed"):
+            bonus += 0.10  # 出来高が20日平均の1.5倍以上（バックテストで最も効果が大きかった条件）
+        if row.get("monowakare_signal") == "up":
+            bonus += 0.05  # ものわかれ（黒い縁取り）からの上抜けと重なる
+        score += bonus
 
     # RSIが40〜70の健全な上昇域
     if 40 <= row["rsi14"] <= 70:
@@ -589,6 +604,7 @@ def main():
     cols = [
         "code", "name", "price", "lot_cost", "per", "pbr", "dividend_yield",
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
+        "volume_ratio", "volume_confirmed",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",

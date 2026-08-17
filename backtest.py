@@ -57,12 +57,16 @@ def backtest_ticker(
     min_ppp_matches: int = 3,
     exit_mode: str = "ma",
     market_regime: pd.Series = None,
+    volume_filter: bool = False,
+    volume_multiple: float = 1.5,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
     trend_filter=True の場合、さらに「PPP一致度がmin_ppp_matches以上」
     「株価が100日線より上」の強いトレンド条件を満たす下半身だけを採用する。
     market_regime を渡した場合、日経平均自体が上昇トレンドの日だけ新規エントリーを許可する。
+    volume_filter=True の場合、下半身当日の出来高が直近20日平均の
+    volume_multiple倍以上（出来高を伴ったブレイク）の場合だけ採用する。
 
     エグジット:
       exit_mode="ma"        終値が exit_period 日線を割り込んだら手仕舞い
@@ -70,9 +74,11 @@ def backtest_ticker(
     """
     close = hist["Close"]
     open_ = hist["Open"]
+    volume = hist["Volume"]
     sma5 = close.rolling(5).mean()
     sma20 = close.rolling(20).mean()
     sma_exit = close.rolling(exit_period).mean()
+    vol_avg20 = volume.rolling(20).mean()
 
     ma_periods = (5, 10, 20, 50, 100)
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
@@ -108,6 +114,12 @@ def backtest_ticker(
             if signal and regime_aligned is not None:
                 regime_ok = regime_aligned.iloc[i]
                 signal = bool(regime_ok) if pd.notna(regime_ok) else False
+
+            if signal and volume_filter:
+                if pd.isna(vol_avg20.iloc[i]) or vol_avg20.iloc[i] == 0:
+                    signal = False
+                else:
+                    signal = volume.iloc[i] >= vol_avg20.iloc[i] * volume_multiple
 
             if signal:
                 in_position = True
@@ -145,11 +157,14 @@ def main():
     exit_period = 20 if exit_mode == "ppp_break" else int(arg1)
     trend_filter = "trend" in sys.argv[2:]
     use_market_regime = "market" in sys.argv[2:]
+    use_volume_filter = "volume" in sys.argv[2:]
 
     tickers = load_tickers()
     filter_desc = "PPP3/4以上+100日線上のみ" if trend_filter else "フィルターなし"
     if use_market_regime:
         filter_desc += "+日経平均が上昇トレンドの日のみ"
+    if use_volume_filter:
+        filter_desc += "+出来高が20日平均の1.5倍以上"
     exit_desc = "5日線が20日線を下抜け（PPP崩れ）" if exit_mode == "ppp_break" else f"{exit_period}日線割れ"
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{HISTORY_PERIOD}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
@@ -170,7 +185,7 @@ def main():
                 continue
             trades = backtest_ticker(
                 code, name, hist, exit_period=exit_period, trend_filter=trend_filter,
-                exit_mode=exit_mode, market_regime=market_regime,
+                exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -185,7 +200,7 @@ def main():
     df = pd.DataFrame(all_trades)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    suffix = ("_trend" if trend_filter else "") + ("_market" if use_market_regime else "")
+    suffix = ("_trend" if trend_filter else "") + ("_market" if use_market_regime else "") + ("_volume" if use_volume_filter else "")
     tag = "ppp" if exit_mode == "ppp_break" else f"exit{exit_period}"
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
