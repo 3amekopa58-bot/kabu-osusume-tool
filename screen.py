@@ -339,6 +339,10 @@ def fetch_one(code: str, name: str) -> dict:
         "per": info.get("trailingPE"),
         "pbr": info.get("priceToBook"),
         "dividend_yield": info.get("dividendYield"),
+        # ベンジャミン・グレアムの財務健全性基準（流動比率は高いほど、
+        # 負債比率は低いほど良い）。yfinanceのinfoからそのまま取得。
+        "current_ratio": info.get("currentRatio"),
+        "debt_to_equity": info.get("debtToEquity"),
     }
 
     if len(hist) >= MIN_HISTORY_DAYS:
@@ -595,7 +599,19 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["per_score"] = 1 - pool["per"].rank(pct=True, na_option="bottom")
     pool["pbr_score"] = 1 - pool["pbr"].rank(pct=True, na_option="bottom")
     pool["dividend_score"] = pool["dividend_yield"].rank(pct=True, na_option="bottom")
-    pool["fundamental_score"] = pool[["per_score", "pbr_score", "dividend_score"]].mean(axis=1)
+
+    # ベンジャミン・グレアムの基準を追加
+    # ①グレアム・ナンバー的な考え方：PER×PBRが低いほど良い（22.5以下が目安）
+    pool["graham_number"] = pool["per"] * pool["pbr"]
+    pool["graham_score"] = 1 - pool["graham_number"].rank(pct=True, na_option="bottom")
+    # ②財務健全性：流動比率は高いほど良い、負債比率は低いほど良い
+    pool["current_ratio_score"] = pool["current_ratio"].rank(pct=True, na_option="bottom")
+    pool["debt_score"] = 1 - pool["debt_to_equity"].rank(pct=True, na_option="bottom")
+
+    pool["fundamental_score"] = pool[[
+        "per_score", "pbr_score", "dividend_score",
+        "graham_score", "current_ratio_score", "debt_score",
+    ]].mean(axis=1)
 
     pool["technical_score"] = pool.apply(lambda r: technical_score(r, market_regime_up), axis=1)
     pool["trend_label"] = pool.apply(trend_label, axis=1)
@@ -640,6 +656,7 @@ def main():
 
     cols = [
         "code", "name", "price", "lot_cost", "per", "pbr", "dividend_yield",
+        "graham_number", "current_ratio", "debt_to_equity",
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
         "volume_ratio", "volume_confirmed",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
