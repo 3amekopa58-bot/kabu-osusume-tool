@@ -40,18 +40,55 @@ def load_tickers():
         return list(csv.DictReader(f))
 
 
-def fetch_market_regime() -> bool:
+def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     """
-    マーケットレジームフィルター：日経平均自体が上昇トレンド（終値が100日線より上）か。
-    バックテストで確認済み：この条件が良い日だけ下半身シグナルを採用すると
-    勝率・平均リターン・プロフィットファクターがすべて改善した（PF 1.72→1.80）。
+    ADX（Average Directional Index）。トレンドの向きではなく「強さ」を
+    0〜100で示す指標（一般に20〜25以上でトレンドが強い、それ未満はレンジ相場
+    とされる）。Wilderの平滑化（EWMA, alpha=1/period）で近似計算する。
+    """
+    prev_close = close.shift(1)
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    up_move = high - prev_high
+    down_move = prev_low - low
+
+    plus_dm = pd.Series(0.0, index=high.index)
+    minus_dm = pd.Series(0.0, index=high.index)
+    plus_dm[(up_move > down_move) & (up_move > 0)] = up_move[(up_move > down_move) & (up_move > 0)]
+    minus_dm[(down_move > up_move) & (down_move > 0)] = down_move[(down_move > up_move) & (down_move > 0)]
+
+    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    return dx.ewm(alpha=1 / period, adjust=False).mean()
+
+
+def fetch_market_regime(adx_threshold: float = 20.0) -> bool:
+    """
+    マーケットレジームフィルター：日経平均自体が上昇トレンド（終値が100日線より上）
+    かつ、ADXがadx_threshold超（トレンドに十分な勢いがある＝レンジ相場でない）か。
+    バックテストで確認済み：5年・10年・26年のすべての期間で、単純な「100日線より
+    上」だけの判定より、ADXでトレンド強度も見る方が勝率・平均リターン・
+    プロフィットファクターが一貫して改善した（26年PF 1.67→2.02）。
     """
     idx = yf.Ticker("^N225").history(period="1y")
     close = idx["Close"]
     sma100 = close.rolling(100).mean()
     if pd.isna(sma100.iloc[-1]):
         return True  # データ不足時は制限しない
-    return bool(close.iloc[-1] > sma100.iloc[-1])
+    is_uptrend = close.iloc[-1] > sma100.iloc[-1]
+    adx = calc_adx(idx["High"], idx["Low"], close)
+    is_strong_trend = pd.notna(adx.iloc[-1]) and adx.iloc[-1] > adx_threshold
+    return bool(is_uptrend and is_strong_trend)
 
 
 def calc_rsi(close: pd.Series, period: int = 14) -> float:
@@ -451,7 +488,7 @@ def buy_timing(row, market_regime_up: bool = True) -> str:
     if not row.get("trend_filter_pass"):
         notes.append("トレンドやや弱め")
     if not market_regime_up:
-        notes.append("日経平均が上昇トレンドでない")
+        notes.append("日経平均の地合いが弱い（トレンド不足）")
     if row.get("kahanshin") and not row.get("volume_confirmed"):
         notes.append("出来高の伴いが弱い")
     confidence = f"（{'・'.join(notes)}・慎重に）" if notes else ""
@@ -582,7 +619,7 @@ def main():
     except Exception as e:
         print(f"  取得失敗（フィルターなしで続行）: {e}")
         market_regime_up = True
-    print(f"  日経平均は{'上昇トレンド' if market_regime_up else '上昇トレンドでない'}と判定")
+    print(f"  日経平均は{'上昇トレンド・ADXも強い' if market_regime_up else '上昇トレンドでない、またはADXが弱い（レンジ相場）'}と判定")
 
     tickers = load_tickers()
     print(f"{len(tickers)}銘柄のデータを取得します…")
