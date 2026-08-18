@@ -585,6 +585,20 @@ def technical_score(row, market_regime_up: bool = True) -> float:
     return score
 
 
+def rank_score(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
+    """
+    パーセンタイル順位を0〜1のスコアに変換する。
+    データ欠損（NaN）は「最良」でも「最悪」でもなく中立（0.5点）として扱う。
+    （pandasのrank(na_option="bottom")はNaNを最大値として扱うため、そのまま
+    使うと「データが無い銘柄が満点になる」という誤った結果になることがあった。
+    2026-08-18に発見・修正。）
+    """
+    pct = series.rank(pct=True, na_option="keep")
+    if not higher_is_better:
+        pct = 1 - pct
+    return pct.fillna(0.5)
+
+
 def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool = True) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
@@ -596,17 +610,17 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool = df[df["affordable"]].copy()
     excluded = df[~df["affordable"]].copy()
 
-    pool["per_score"] = 1 - pool["per"].rank(pct=True, na_option="bottom")
-    pool["pbr_score"] = 1 - pool["pbr"].rank(pct=True, na_option="bottom")
-    pool["dividend_score"] = pool["dividend_yield"].rank(pct=True, na_option="bottom")
+    pool["per_score"] = rank_score(pool["per"], higher_is_better=False)
+    pool["pbr_score"] = rank_score(pool["pbr"], higher_is_better=False)
+    pool["dividend_score"] = rank_score(pool["dividend_yield"], higher_is_better=True)
 
     # ベンジャミン・グレアムの基準を追加
     # ①グレアム・ナンバー的な考え方：PER×PBRが低いほど良い（22.5以下が目安）
     pool["graham_number"] = pool["per"] * pool["pbr"]
-    pool["graham_score"] = 1 - pool["graham_number"].rank(pct=True, na_option="bottom")
+    pool["graham_score"] = rank_score(pool["graham_number"], higher_is_better=False)
     # ②財務健全性：流動比率は高いほど良い、負債比率は低いほど良い
-    pool["current_ratio_score"] = pool["current_ratio"].rank(pct=True, na_option="bottom")
-    pool["debt_score"] = 1 - pool["debt_to_equity"].rank(pct=True, na_option="bottom")
+    pool["current_ratio_score"] = rank_score(pool["current_ratio"], higher_is_better=True)
+    pool["debt_score"] = rank_score(pool["debt_to_equity"], higher_is_better=False)
 
     pool["fundamental_score"] = pool[[
         "per_score", "pbr_score", "dividend_score",
