@@ -48,6 +48,54 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     return close > sma100
 
 
+def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    ADX（Average Directional Index）。トレンドの向きではなく「強さ」を
+    0〜100で示す指標（一般に20〜25以上でトレンドが強い、それ未満はレンジ相場
+    とされる）。Wilderの平滑化（EWMA, alpha=1/period）で近似計算する。
+    """
+    prev_close = close.shift(1)
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    up_move = high - prev_high
+    down_move = prev_low - low
+
+    plus_dm = pd.Series(0.0, index=high.index)
+    minus_dm = pd.Series(0.0, index=high.index)
+    plus_dm[(up_move > down_move) & (up_move > 0)] = up_move[(up_move > down_move) & (up_move > 0)]
+    minus_dm[(down_move > up_move) & (down_move > 0)] = down_move[(down_move > up_move) & (down_move > 0)]
+
+    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    return dx.ewm(alpha=1 / period, adjust=False).mean()
+
+
+def fetch_market_regime_adx(period: str = "5y", adx_threshold: float = 20.0) -> pd.Series:
+    """
+    マーケットレジームフィルターのADX版。「終値が100日線より上」（方向）に
+    加えて、ADXが閾値以上（トレンドに十分な勢いがある＝レンジ相場でない）
+    の日だけを「地合いが良い」と判定する。方向感の乏しい年（レンジ相場）を
+    除外する狙い（PPP版では効果が薄かったため、別角度として試す）。
+    """
+    idx = yf.Ticker("^N225").history(period=period)
+    close = idx["Close"]
+    sma100 = close.rolling(100).mean()
+    is_uptrend = close > sma100
+    adx = calc_adx(idx["High"], idx["Low"], close)
+    is_strong_trend = adx > adx_threshold
+    return is_uptrend & is_strong_trend
+
+
 def fetch_market_regime_ppp(period: str = "5y", min_matches: int = 3) -> pd.Series:
     """
     マーケットレジームフィルターの強化版。「終値が100日線より上」という
@@ -174,8 +222,9 @@ def main():
     exit_mode = "ppp_break" if arg1 == "ppp" else "ma"
     exit_period = 20 if exit_mode == "ppp_break" else int(arg1)
     trend_filter = "trend" in sys.argv[2:]
-    use_market_regime = "market" in sys.argv[2:] or "marketppp" in sys.argv[2:]
     use_market_regime_ppp = "marketppp" in sys.argv[2:]
+    use_market_regime_adx = "marketadx" in sys.argv[2:]
+    use_market_regime = "market" in sys.argv[2:] or use_market_regime_ppp or use_market_regime_adx
     use_volume_filter = "volume" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
@@ -184,6 +233,8 @@ def main():
     filter_desc = "PPP3/4以上+100日線上のみ" if trend_filter else "フィルターなし"
     if use_market_regime_ppp:
         filter_desc += "+日経平均自体がPPP3/4以上の強いトレンドの日のみ"
+    elif use_market_regime_adx:
+        filter_desc += "+日経平均がADX20超の強いトレンドの日のみ"
     elif use_market_regime:
         filter_desc += "+日経平均が上昇トレンドの日のみ"
     if use_volume_filter:
@@ -195,6 +246,9 @@ def main():
     if use_market_regime_ppp:
         print("日経平均のデータを取得中（PPP判定）…")
         market_regime = fetch_market_regime_ppp(history_period)
+    elif use_market_regime_adx:
+        print("日経平均のデータを取得中（ADX判定）…")
+        market_regime = fetch_market_regime_adx(history_period)
     elif use_market_regime:
         print("日経平均のデータを取得中…")
         market_regime = fetch_market_regime(history_period)
@@ -226,7 +280,14 @@ def main():
     df = pd.DataFrame(all_trades)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    market_suffix = "_marketppp" if use_market_regime_ppp else ("_market" if use_market_regime else "")
+    if use_market_regime_ppp:
+        market_suffix = "_marketppp"
+    elif use_market_regime_adx:
+        market_suffix = "_marketadx"
+    elif use_market_regime:
+        market_suffix = "_market"
+    else:
+        market_suffix = ""
     suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "")
     tag = "ppp" if exit_mode == "ppp_break" else f"exit{exit_period}"
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
