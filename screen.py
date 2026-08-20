@@ -16,7 +16,9 @@ tickers.csv に書かれた銘柄について、
 
 import csv
 import datetime as dt
+import json
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import yfinance as yf
@@ -24,6 +26,7 @@ import yfinance as yf
 BASE_DIR = Path(__file__).parent
 TICKERS_CSV = BASE_DIR / "tickers.csv"
 OUTPUT_DIR = BASE_DIR / "output"
+EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
 
 FUNDAMENTAL_WEIGHT = 0.5
 TECHNICAL_WEIGHT = 0.5
@@ -38,6 +41,21 @@ MIN_HISTORY_DAYS = 105  # 100日線 + スイングカウント用のバッファ
 def load_tickers():
     with open(TICKERS_CSV, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def load_edinet_cache() -> dict:
+    """
+    かぶ1000氏の考え方に基づく参考指標（その他有価証券評価差額金の増減）。
+    scripts/build_edinet_cache.py で事前生成したJSONを読むだけで、
+    毎回EDINET APIを叩かない（年1回しか更新されないデータのため）。
+    有価証券報告書の「個別（親会社単体）」財務諸表から取得（連結決算が
+    IFRSの企業でも、個別は日本基準で開示するのが通例のため収録対象になる）。
+    それでも個別財務諸表でこの項目自体を開示していない企業は対象外。
+    """
+    if not EDINET_CACHE_PATH.exists():
+        return {}
+    with open(EDINET_CACHE_PATH, encoding="utf-8") as f:
+        return json.load(f).get("data", {})
 
 
 def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
@@ -327,10 +345,12 @@ def detect_fushime(close: pd.Series, lookback: int = 60, recent_days: int = 5) -
     return {"breakout_level": breakout_level, "near_level": near_level, "label": label}
 
 
-def fetch_one(code: str, name: str) -> dict:
+def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None) -> dict:
     ticker = yf.Ticker(code)
     info = ticker.info
     hist = ticker.history(period="3y")
+
+    edinet_info = (edinet_cache or {}).get(code, {})
 
     row = {
         "code": code,
@@ -343,6 +363,9 @@ def fetch_one(code: str, name: str) -> dict:
         # 負債比率は低いほど良い）。yfinanceのinfoからそのまま取得。
         "current_ratio": info.get("currentRatio"),
         "debt_to_equity": info.get("debtToEquity"),
+        # かぶ1000氏の参考指標：保有有価証券の含み益の増減（個別財務諸表ベース）
+        # （収録企業は225銘柄中171銘柄・スコアには未使用、参考表示のみ）
+        "securities_valuation_diff_change_yen": edinet_info.get("valuation_diff_change_yen"),
     }
 
     if len(hist) >= MIN_HISTORY_DAYS:
@@ -652,13 +675,14 @@ def main():
     print(f"  日経平均は{'上昇トレンド・ADXも強い' if market_regime_up else '上昇トレンドでない、またはADXが弱い（レンジ相場）'}と判定")
 
     tickers = load_tickers()
+    edinet_cache = load_edinet_cache()
     print(f"{len(tickers)}銘柄のデータを取得します…")
 
     rows = []
     for i, t in enumerate(tickers, 1):
         code, name = t["code"], t["name"]
         try:
-            rows.append(fetch_one(code, name))
+            rows.append(fetch_one(code, name, edinet_cache))
             print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得OK")
         except Exception as e:
             print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
@@ -670,7 +694,7 @@ def main():
 
     cols = [
         "code", "name", "price", "lot_cost", "per", "pbr", "dividend_yield",
-        "graham_number", "current_ratio", "debt_to_equity",
+        "graham_number", "current_ratio", "debt_to_equity", "securities_valuation_diff_change_yen",
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
         "volume_ratio", "volume_confirmed",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",

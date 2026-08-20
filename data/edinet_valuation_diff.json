@@ -1,0 +1,1203 @@
+{
+ "generated_at": "2026-08-20",
+ "note": "その他有価証券評価差額金（日本基準開示企業のみ・IFRS企業は対象外）。かぶ1000氏の考え方に基づく参考指標。",
+ "data": {
+  "1332.T": {
+   "filer_name": "株式会社ニッスイ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 15262000000.0,
+   "valuation_diff_prior_yen": 12050000000.0,
+   "valuation_diff_change_yen": 3212000000.0
+  },
+  "1801.T": {
+   "filer_name": "大成建設株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 96109000000.0,
+   "valuation_diff_prior_yen": 85030000000.0,
+   "valuation_diff_change_yen": 11079000000.0
+  },
+  "1802.T": {
+   "filer_name": "株式会社大林組",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 147834000000.0,
+   "valuation_diff_prior_yen": 126467000000.0,
+   "valuation_diff_change_yen": 21367000000.0
+  },
+  "1803.T": {
+   "filer_name": "清水建設株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 128618000000.0,
+   "valuation_diff_prior_yen": 118144000000.0,
+   "valuation_diff_change_yen": 10474000000.0
+  },
+  "1808.T": {
+   "filer_name": "株式会社長谷工コーポレーション",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 17669000000.0,
+   "valuation_diff_prior_yen": 8565000000.0,
+   "valuation_diff_change_yen": 9104000000.0
+  },
+  "1812.T": {
+   "filer_name": "鹿島建設株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 150829000000.0,
+   "valuation_diff_prior_yen": 111616000000.0,
+   "valuation_diff_change_yen": 39213000000.0
+  },
+  "1925.T": {
+   "filer_name": "大和ハウス工業株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 50748000000.0,
+   "valuation_diff_prior_yen": 39416000000.0,
+   "valuation_diff_change_yen": 11332000000.0
+  },
+  "1963.T": {
+   "filer_name": "日揮ホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 12235000000.0,
+   "valuation_diff_prior_yen": 6413000000.0,
+   "valuation_diff_change_yen": 5822000000.0
+  },
+  "2002.T": {
+   "filer_name": "株式会社日清製粉グループ本社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 74554000000.0,
+   "valuation_diff_prior_yen": 57865000000.0,
+   "valuation_diff_change_yen": 16689000000.0
+  },
+  "2269.T": {
+   "filer_name": "明治ホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 9951000000.0,
+   "valuation_diff_prior_yen": 8038000000.0,
+   "valuation_diff_change_yen": 1913000000.0
+  },
+  "2282.T": {
+   "filer_name": "日本ハム株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 10798000000.0,
+   "valuation_diff_prior_yen": 7678000000.0,
+   "valuation_diff_change_yen": 3120000000.0
+  },
+  "2413.T": {
+   "filer_name": "エムスリー株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 1295000000.0,
+   "valuation_diff_prior_yen": 1107000000.0,
+   "valuation_diff_change_yen": 188000000.0
+  },
+  "2432.T": {
+   "filer_name": "株式会社ディー・エヌ・エー",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 14597000000.0,
+   "valuation_diff_prior_yen": 53566000000.0,
+   "valuation_diff_change_yen": -38969000000.0
+  },
+  "2502.T": {
+   "filer_name": "アサヒグループホールディングス株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 757000000.0,
+   "valuation_diff_prior_yen": 522000000.0,
+   "valuation_diff_change_yen": 235000000.0
+  },
+  "2768.T": {
+   "filer_name": "双日株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 44413000000.0,
+   "valuation_diff_prior_yen": 25301000000.0,
+   "valuation_diff_change_yen": 19112000000.0
+  },
+  "2801.T": {
+   "filer_name": "キッコーマン株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 24813000000.0,
+   "valuation_diff_prior_yen": 19863000000.0,
+   "valuation_diff_change_yen": 4950000000.0
+  },
+  "2802.T": {
+   "filer_name": "味の素株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 10419000000.0,
+   "valuation_diff_prior_yen": 8803000000.0,
+   "valuation_diff_change_yen": 1616000000.0
+  },
+  "2871.T": {
+   "filer_name": "株式会社ニチレイ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 14863000000.0,
+   "valuation_diff_prior_yen": 13089000000.0,
+   "valuation_diff_change_yen": 1774000000.0
+  },
+  "3086.T": {
+   "filer_name": "Ｊ.フロント リテイリング株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 143000000.0,
+   "valuation_diff_prior_yen": 123000000.0,
+   "valuation_diff_change_yen": 20000000.0
+  },
+  "3092.T": {
+   "filer_name": "株式会社ZOZO",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 116000000.0,
+   "valuation_diff_prior_yen": 80000000.0,
+   "valuation_diff_change_yen": 36000000.0
+  },
+  "3289.T": {
+   "filer_name": "東急不動産ホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 9778000000.0,
+   "valuation_diff_prior_yen": 6216000000.0,
+   "valuation_diff_change_yen": 3562000000.0
+  },
+  "3382.T": {
+   "filer_name": "株式会社セブン＆アイ・ホールディングス",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 20253000000.0,
+   "valuation_diff_prior_yen": 15413000000.0,
+   "valuation_diff_change_yen": 4840000000.0
+  },
+  "3401.T": {
+   "filer_name": "帝人株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 7145000000.0,
+   "valuation_diff_prior_yen": 5732000000.0,
+   "valuation_diff_change_yen": 1413000000.0
+  },
+  "3402.T": {
+   "filer_name": "東レ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 54656000000.0,
+   "valuation_diff_prior_yen": 46612000000.0,
+   "valuation_diff_change_yen": 8044000000.0
+  },
+  "3407.T": {
+   "filer_name": "旭化成株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 10299000000.0,
+   "valuation_diff_prior_yen": 32728000000.0,
+   "valuation_diff_change_yen": -22429000000.0
+  },
+  "3861.T": {
+   "filer_name": "王子ホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 37667000000.0,
+   "valuation_diff_prior_yen": 45463000000.0,
+   "valuation_diff_change_yen": -7796000000.0
+  },
+  "4005.T": {
+   "filer_name": "住友化学株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 48702000000.0,
+   "valuation_diff_prior_yen": 40328000000.0,
+   "valuation_diff_change_yen": 8374000000.0
+  },
+  "4021.T": {
+   "filer_name": "日産化学株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 10193000000.0,
+   "valuation_diff_prior_yen": 6189000000.0,
+   "valuation_diff_change_yen": 4004000000.0
+  },
+  "4042.T": {
+   "filer_name": "東ソー株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 23581000000.0,
+   "valuation_diff_prior_yen": 16807000000.0,
+   "valuation_diff_change_yen": 6774000000.0
+  },
+  "4043.T": {
+   "filer_name": "株式会社トクヤマ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 9338000000.0,
+   "valuation_diff_prior_yen": 6940000000.0,
+   "valuation_diff_change_yen": 2398000000.0
+  },
+  "4061.T": {
+   "filer_name": "デンカ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 11658000000.0,
+   "valuation_diff_prior_yen": 9893000000.0,
+   "valuation_diff_change_yen": 1765000000.0
+  },
+  "4063.T": {
+   "filer_name": "信越化学工業株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 29638000000.0,
+   "valuation_diff_prior_yen": 27379000000.0,
+   "valuation_diff_change_yen": 2259000000.0
+  },
+  "4183.T": {
+   "filer_name": "三井化学株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 927000000.0,
+   "valuation_diff_prior_yen": 858000000.0,
+   "valuation_diff_change_yen": 69000000.0
+  },
+  "4188.T": {
+   "filer_name": "三菱ケミカルグループ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 183000000.0,
+   "valuation_diff_prior_yen": 167000000.0,
+   "valuation_diff_change_yen": 16000000.0
+  },
+  "4208.T": {
+   "filer_name": "ＵＢＥ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 6379000000.0,
+   "valuation_diff_prior_yen": 4569000000.0,
+   "valuation_diff_change_yen": 1810000000.0
+  },
+  "4307.T": {
+   "filer_name": "株式会社野村総合研究所",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 22513000000.0,
+   "valuation_diff_prior_yen": 21789000000.0,
+   "valuation_diff_change_yen": 724000000.0
+  },
+  "4502.T": {
+   "filer_name": "武田薬品工業株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 8161000000.0,
+   "valuation_diff_prior_yen": 6151000000.0,
+   "valuation_diff_change_yen": 2010000000.0
+  },
+  "4503.T": {
+   "filer_name": "アステラス製薬株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 3567000000.0,
+   "valuation_diff_prior_yen": 3543000000.0,
+   "valuation_diff_change_yen": 24000000.0
+  },
+  "4506.T": {
+   "filer_name": "住友ファーマ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 7640000000.0,
+   "valuation_diff_prior_yen": 7703000000.0,
+   "valuation_diff_change_yen": -63000000.0
+  },
+  "4507.T": {
+   "filer_name": "塩野義製薬株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 25993000000.0,
+   "valuation_diff_prior_yen": 19994000000.0,
+   "valuation_diff_change_yen": 5999000000.0
+  },
+  "4523.T": {
+   "filer_name": "エーザイ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 11352000000.0,
+   "valuation_diff_prior_yen": 13934000000.0,
+   "valuation_diff_change_yen": -2582000000.0
+  },
+  "4543.T": {
+   "filer_name": "テルモ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 3271000000.0,
+   "valuation_diff_prior_yen": 3780000000.0,
+   "valuation_diff_change_yen": -509000000.0
+  },
+  "4568.T": {
+   "filer_name": "第一三共株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 20379000000.0,
+   "valuation_diff_prior_yen": 22281000000.0,
+   "valuation_diff_change_yen": -1902000000.0
+  },
+  "4661.T": {
+   "filer_name": "株式会社オリエンタルランド",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 17398000000.0,
+   "valuation_diff_prior_yen": 15271000000.0,
+   "valuation_diff_change_yen": 2127000000.0
+  },
+  "4689.T": {
+   "filer_name": "LINEヤフー株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 10519000000.0,
+   "valuation_diff_prior_yen": 12045000000.0,
+   "valuation_diff_change_yen": -1526000000.0
+  },
+  "4901.T": {
+   "filer_name": "富士フイルムホールディングス株式会社",
+   "accounting_standard": "US GAAP",
+   "valuation_diff_current_yen": 7302000000.0,
+   "valuation_diff_prior_yen": 15157000000.0,
+   "valuation_diff_change_yen": -7855000000.0
+  },
+  "4902.T": {
+   "filer_name": "コニカミノルタ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 6903000000.0,
+   "valuation_diff_prior_yen": 4544000000.0,
+   "valuation_diff_change_yen": 2359000000.0
+  },
+  "5019.T": {
+   "filer_name": "出光興産株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 2258000000.0,
+   "valuation_diff_prior_yen": 1714000000.0,
+   "valuation_diff_change_yen": 544000000.0
+  },
+  "5020.T": {
+   "filer_name": "ENEOSホールディングス株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 13821000000.0,
+   "valuation_diff_prior_yen": 13660000000.0,
+   "valuation_diff_change_yen": 161000000.0
+  },
+  "5233.T": {
+   "filer_name": "太平洋セメント株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 22542000000.0,
+   "valuation_diff_prior_yen": 11455000000.0,
+   "valuation_diff_change_yen": 11087000000.0
+  },
+  "5332.T": {
+   "filer_name": "ＴＯＴＯ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 26418000000.0,
+   "valuation_diff_prior_yen": 25335000000.0,
+   "valuation_diff_change_yen": 1083000000.0
+  },
+  "5333.T": {
+   "filer_name": "ＮＧＫ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 44442000000.0,
+   "valuation_diff_prior_yen": 32342000000.0,
+   "valuation_diff_change_yen": 12100000000.0
+  },
+  "5401.T": {
+   "filer_name": "日本製鉄株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 154812000000.0,
+   "valuation_diff_prior_yen": 101923000000.0,
+   "valuation_diff_change_yen": 52889000000.0
+  },
+  "5406.T": {
+   "filer_name": "株式会社　神戸製鋼所",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 41069000000.0,
+   "valuation_diff_prior_yen": 40944000000.0,
+   "valuation_diff_change_yen": 125000000.0
+  },
+  "5631.T": {
+   "filer_name": "株式会社日本製鋼所",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 11226000000.0,
+   "valuation_diff_prior_yen": 7621000000.0,
+   "valuation_diff_change_yen": 3605000000.0
+  },
+  "5706.T": {
+   "filer_name": "三井金属株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 814000000.0,
+   "valuation_diff_prior_yen": 302000000.0,
+   "valuation_diff_change_yen": 512000000.0
+  },
+  "5711.T": {
+   "filer_name": "三菱マテリアル株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 3943000000.0,
+   "valuation_diff_prior_yen": 1875000000.0,
+   "valuation_diff_change_yen": 2068000000.0
+  },
+  "5713.T": {
+   "filer_name": "住友金属鉱山株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 152797000000.0,
+   "valuation_diff_prior_yen": 99097000000.0,
+   "valuation_diff_change_yen": 53700000000.0
+  },
+  "5714.T": {
+   "filer_name": "ＤＯＷＡホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 24435000000.0,
+   "valuation_diff_prior_yen": 12209000000.0,
+   "valuation_diff_change_yen": 12226000000.0
+  },
+  "5801.T": {
+   "filer_name": "古河電気工業株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 26934000000.0,
+   "valuation_diff_prior_yen": 22229000000.0,
+   "valuation_diff_change_yen": 4705000000.0
+  },
+  "5802.T": {
+   "filer_name": "住友電気工業株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 63701000000.0,
+   "valuation_diff_prior_yen": 42675000000.0,
+   "valuation_diff_change_yen": 21026000000.0
+  },
+  "5803.T": {
+   "filer_name": "株式会社フジクラ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 8657000000.0,
+   "valuation_diff_prior_yen": 5781000000.0,
+   "valuation_diff_change_yen": 2876000000.0
+  },
+  "6098.T": {
+   "filer_name": "株式会社リクルートホールディングス",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 17000000000.0,
+   "valuation_diff_prior_yen": 23818000000.0,
+   "valuation_diff_change_yen": -6818000000.0
+  },
+  "6103.T": {
+   "filer_name": "オークマ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 20890000000.0,
+   "valuation_diff_prior_yen": 13049000000.0,
+   "valuation_diff_change_yen": 7841000000.0
+  },
+  "6113.T": {
+   "filer_name": "株式会社 アマダ",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 16000000.0,
+   "valuation_diff_prior_yen": 3259000000.0,
+   "valuation_diff_change_yen": -3243000000.0
+  },
+  "6178.T": {
+   "filer_name": "日本郵政株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": -37265000000.0,
+   "valuation_diff_prior_yen": -30054000000.0,
+   "valuation_diff_change_yen": -7211000000.0
+  },
+  "6273.T": {
+   "filer_name": "ＳＭＣ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 19203000000.0,
+   "valuation_diff_prior_yen": 14143000000.0,
+   "valuation_diff_change_yen": 5060000000.0
+  },
+  "6305.T": {
+   "filer_name": "日立建機株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 6596000000.0,
+   "valuation_diff_prior_yen": 5078000000.0,
+   "valuation_diff_change_yen": 1518000000.0
+  },
+  "6367.T": {
+   "filer_name": "ダイキン工業株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 81397000000.0,
+   "valuation_diff_prior_yen": 53161000000.0,
+   "valuation_diff_change_yen": 28236000000.0
+  },
+  "6471.T": {
+   "filer_name": "日本精工株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 12895000000.0,
+   "valuation_diff_prior_yen": 16653000000.0,
+   "valuation_diff_change_yen": -3758000000.0
+  },
+  "6472.T": {
+   "filer_name": "ＮＴＮ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 129000000.0,
+   "valuation_diff_prior_yen": 116000000.0,
+   "valuation_diff_change_yen": 13000000.0
+  },
+  "6473.T": {
+   "filer_name": "株式会社ジェイテクト",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 33886000000.0,
+   "valuation_diff_prior_yen": 42955000000.0,
+   "valuation_diff_change_yen": -9069000000.0
+  },
+  "6479.T": {
+   "filer_name": "ミネベアミツミ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 6923000000.0,
+   "valuation_diff_prior_yen": 4852000000.0,
+   "valuation_diff_change_yen": 2071000000.0
+  },
+  "6501.T": {
+   "filer_name": "株式会社日立製作所",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 158266000000.0,
+   "valuation_diff_prior_yen": 23692000000.0,
+   "valuation_diff_change_yen": 134574000000.0
+  },
+  "6503.T": {
+   "filer_name": "三菱電機株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 21541000000.0,
+   "valuation_diff_prior_yen": 18945000000.0,
+   "valuation_diff_change_yen": 2596000000.0
+  },
+  "6504.T": {
+   "filer_name": "富士電機株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 56908000000.0,
+   "valuation_diff_prior_yen": 49219000000.0,
+   "valuation_diff_change_yen": 7689000000.0
+  },
+  "6506.T": {
+   "filer_name": "株式会社安川電機",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 20233000000.0,
+   "valuation_diff_prior_yen": 10951000000.0,
+   "valuation_diff_change_yen": 9282000000.0
+  },
+  "6645.T": {
+   "filer_name": "オムロン株式会社",
+   "accounting_standard": "US GAAP",
+   "valuation_diff_current_yen": 1048000000.0,
+   "valuation_diff_prior_yen": 727000000.0,
+   "valuation_diff_change_yen": 321000000.0
+  },
+  "6701.T": {
+   "filer_name": "日本電気株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 29815000000.0,
+   "valuation_diff_prior_yen": 30578000000.0,
+   "valuation_diff_change_yen": -763000000.0
+  },
+  "6702.T": {
+   "filer_name": "富士通株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 19523000000.0,
+   "valuation_diff_prior_yen": 11967000000.0,
+   "valuation_diff_change_yen": 7556000000.0
+  },
+  "6724.T": {
+   "filer_name": "セイコーエプソン株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 4913000000.0,
+   "valuation_diff_prior_yen": 3490000000.0,
+   "valuation_diff_change_yen": 1423000000.0
+  },
+  "6752.T": {
+   "filer_name": "パナソニックホールディングス株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 12352000000.0,
+   "valuation_diff_prior_yen": 12961000000.0,
+   "valuation_diff_change_yen": -609000000.0
+  },
+  "6753.T": {
+   "filer_name": "シャープ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 21028000000.0,
+   "valuation_diff_prior_yen": 18998000000.0,
+   "valuation_diff_change_yen": 2030000000.0
+  },
+  "6758.T": {
+   "filer_name": "ソニーグループ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": -559000000.0,
+   "valuation_diff_prior_yen": 556000000.0,
+   "valuation_diff_change_yen": -1115000000.0
+  },
+  "6762.T": {
+   "filer_name": "ＴＤＫ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": null,
+   "valuation_diff_prior_yen": 13000000.0,
+   "valuation_diff_change_yen": null
+  },
+  "6770.T": {
+   "filer_name": "アルプスアルパイン株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 5423000000.0,
+   "valuation_diff_prior_yen": 2625000000.0,
+   "valuation_diff_change_yen": 2798000000.0
+  },
+  "6841.T": {
+   "filer_name": "横河電機株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 26034000000.0,
+   "valuation_diff_prior_yen": 21782000000.0,
+   "valuation_diff_change_yen": 4252000000.0
+  },
+  "6857.T": {
+   "filer_name": "株式会社アドバンテスト",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 760000000.0,
+   "valuation_diff_prior_yen": -101000000.0,
+   "valuation_diff_change_yen": 861000000.0
+  },
+  "6861.T": {
+   "filer_name": "株式会社キーエンス",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": -11892000000.0,
+   "valuation_diff_prior_yen": -8119000000.0,
+   "valuation_diff_change_yen": -3773000000.0
+  },
+  "6902.T": {
+   "filer_name": "株式会社デンソー",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 818810000000.0,
+   "valuation_diff_prior_yen": 842087000000.0,
+   "valuation_diff_change_yen": -23277000000.0
+  },
+  "6954.T": {
+   "filer_name": "ファナック株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 28069000000.0,
+   "valuation_diff_prior_yen": 14224000000.0,
+   "valuation_diff_change_yen": 13845000000.0
+  },
+  "6963.T": {
+   "filer_name": "ローム株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 23662000000.0,
+   "valuation_diff_prior_yen": 20296000000.0,
+   "valuation_diff_change_yen": 3366000000.0
+  },
+  "6971.T": {
+   "filer_name": "京セラ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 1056824000000.0,
+   "valuation_diff_prior_yen": 1082040000000.0,
+   "valuation_diff_change_yen": -25216000000.0
+  },
+  "6981.T": {
+   "filer_name": "株式会社村田製作所",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 11269000000.0,
+   "valuation_diff_prior_yen": 5554000000.0,
+   "valuation_diff_change_yen": 5715000000.0
+  },
+  "6988.T": {
+   "filer_name": "日東電工株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": -118000000.0,
+   "valuation_diff_prior_yen": -276000000.0,
+   "valuation_diff_change_yen": 158000000.0
+  },
+  "7004.T": {
+   "filer_name": "カナデビア株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": -23000000.0,
+   "valuation_diff_prior_yen": -21000000.0,
+   "valuation_diff_change_yen": -2000000.0
+  },
+  "7011.T": {
+   "filer_name": "三菱重工業株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 89529000000.0,
+   "valuation_diff_prior_yen": 56438000000.0,
+   "valuation_diff_change_yen": 33091000000.0
+  },
+  "7012.T": {
+   "filer_name": "川崎重工業株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 3678000000.0,
+   "valuation_diff_prior_yen": 1973000000.0,
+   "valuation_diff_change_yen": 1705000000.0
+  },
+  "7013.T": {
+   "filer_name": "株式会社ＩＨＩ",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 2145000000.0,
+   "valuation_diff_prior_yen": 4643000000.0,
+   "valuation_diff_change_yen": -2498000000.0
+  },
+  "7201.T": {
+   "filer_name": "日産自動車株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 847000000.0,
+   "valuation_diff_prior_yen": 782000000.0,
+   "valuation_diff_change_yen": 65000000.0
+  },
+  "7202.T": {
+   "filer_name": "いすゞ自動車株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 65451000000.0,
+   "valuation_diff_prior_yen": 54359000000.0,
+   "valuation_diff_change_yen": 11092000000.0
+  },
+  "7203.T": {
+   "filer_name": "トヨタ自動車株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 1825640000000.0,
+   "valuation_diff_prior_yen": 1780763000000.0,
+   "valuation_diff_change_yen": 44877000000.0
+  },
+  "7211.T": {
+   "filer_name": "三菱自動車工業株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 985000000.0,
+   "valuation_diff_prior_yen": -542000000.0,
+   "valuation_diff_change_yen": 1527000000.0
+  },
+  "7261.T": {
+   "filer_name": "マツダ株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 57034000000.0,
+   "valuation_diff_prior_yen": 40959000000.0,
+   "valuation_diff_change_yen": 16075000000.0
+  },
+  "7267.T": {
+   "filer_name": "本田技研工業株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 61972000000.0,
+   "valuation_diff_prior_yen": 50368000000.0,
+   "valuation_diff_change_yen": 11604000000.0
+  },
+  "7269.T": {
+   "filer_name": "スズキ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 75265000000.0,
+   "valuation_diff_prior_yen": 55423000000.0,
+   "valuation_diff_change_yen": 19842000000.0
+  },
+  "7270.T": {
+   "filer_name": "株式会社ＳＵＢＡＲＵ",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 55813000000.0,
+   "valuation_diff_prior_yen": 36435000000.0,
+   "valuation_diff_change_yen": 19378000000.0
+  },
+  "7731.T": {
+   "filer_name": "株式会社ニコン",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 32104000000.0,
+   "valuation_diff_prior_yen": 28178000000.0,
+   "valuation_diff_change_yen": 3926000000.0
+  },
+  "7733.T": {
+   "filer_name": "オリンパス株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 199000000.0,
+   "valuation_diff_prior_yen": 181000000.0,
+   "valuation_diff_change_yen": 18000000.0
+  },
+  "7735.T": {
+   "filer_name": "株式会社SCREENホールディングス",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 24122000000.0,
+   "valuation_diff_prior_yen": 19207000000.0,
+   "valuation_diff_change_yen": 4915000000.0
+  },
+  "7741.T": {
+   "filer_name": "ＨＯＹＡ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": -39000000.0,
+   "valuation_diff_prior_yen": 8019000000.0,
+   "valuation_diff_change_yen": -8058000000.0
+  },
+  "7752.T": {
+   "filer_name": "株式会社リコー",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 4396000000.0,
+   "valuation_diff_prior_yen": 4170000000.0,
+   "valuation_diff_change_yen": 226000000.0
+  },
+  "7832.T": {
+   "filer_name": "株式会社バンダイナムコホールディングス",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 72448000000.0,
+   "valuation_diff_prior_yen": 84841000000.0,
+   "valuation_diff_change_yen": -12393000000.0
+  },
+  "7911.T": {
+   "filer_name": "TOPPANホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 29089000000.0,
+   "valuation_diff_prior_yen": 40582000000.0,
+   "valuation_diff_change_yen": -11493000000.0
+  },
+  "7912.T": {
+   "filer_name": "大日本印刷株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 86286000000.0,
+   "valuation_diff_prior_yen": 103821000000.0,
+   "valuation_diff_change_yen": -17535000000.0
+  },
+  "7951.T": {
+   "filer_name": "ヤマハ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 25495000000.0,
+   "valuation_diff_prior_yen": 27893000000.0,
+   "valuation_diff_change_yen": -2398000000.0
+  },
+  "7974.T": {
+   "filer_name": "任天堂株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 54153000000.0,
+   "valuation_diff_prior_yen": 69281000000.0,
+   "valuation_diff_change_yen": -15128000000.0
+  },
+  "8001.T": {
+   "filer_name": "伊藤忠商事株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 80448000000.0,
+   "valuation_diff_prior_yen": 71835000000.0,
+   "valuation_diff_change_yen": 8613000000.0
+  },
+  "8002.T": {
+   "filer_name": "丸紅株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 67346000000.0,
+   "valuation_diff_prior_yen": 58163000000.0,
+   "valuation_diff_change_yen": 9183000000.0
+  },
+  "8015.T": {
+   "filer_name": "豊田通商株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 134958000000.0,
+   "valuation_diff_prior_yen": 211618000000.0,
+   "valuation_diff_change_yen": -76660000000.0
+  },
+  "8031.T": {
+   "filer_name": "三井物産株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 688417000000.0,
+   "valuation_diff_prior_yen": 356636000000.0,
+   "valuation_diff_change_yen": 331781000000.0
+  },
+  "8035.T": {
+   "filer_name": "東京エレクトロン株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 147948000000.0,
+   "valuation_diff_prior_yen": 129143000000.0,
+   "valuation_diff_change_yen": 18805000000.0
+  },
+  "8053.T": {
+   "filer_name": "住友商事株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 123678000000.0,
+   "valuation_diff_prior_yen": 128661000000.0,
+   "valuation_diff_change_yen": -4983000000.0
+  },
+  "8058.T": {
+   "filer_name": "三菱商事株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 345015000000.0,
+   "valuation_diff_prior_yen": 282799000000.0,
+   "valuation_diff_change_yen": 62216000000.0
+  },
+  "8233.T": {
+   "filer_name": "株式会社髙島屋",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 12120000000.0,
+   "valuation_diff_prior_yen": 8362000000.0,
+   "valuation_diff_change_yen": 3758000000.0
+  },
+  "8252.T": {
+   "filer_name": "株式会社丸井グループ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 10695000000.0,
+   "valuation_diff_prior_yen": 10838000000.0,
+   "valuation_diff_change_yen": -143000000.0
+  },
+  "8253.T": {
+   "filer_name": "株式会社クレディセゾン",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 21642000000.0,
+   "valuation_diff_prior_yen": 18919000000.0,
+   "valuation_diff_change_yen": 2723000000.0
+  },
+  "8267.T": {
+   "filer_name": "イオン株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 30366000000.0,
+   "valuation_diff_prior_yen": 18939000000.0,
+   "valuation_diff_change_yen": 11427000000.0
+  },
+  "8304.T": {
+   "filer_name": "株式会社あおぞら銀行",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": -24953000000.0,
+   "valuation_diff_prior_yen": -39478000000.0,
+   "valuation_diff_change_yen": 14525000000.0
+  },
+  "8308.T": {
+   "filer_name": "株式会社りそなホールディングス",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": null,
+   "valuation_diff_prior_yen": 3389000000.0,
+   "valuation_diff_change_yen": null
+  },
+  "8316.T": {
+   "filer_name": "株式会社三井住友フィナンシャルグループ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 50485000000.0,
+   "valuation_diff_prior_yen": 19022000000.0,
+   "valuation_diff_change_yen": 31463000000.0
+  },
+  "8331.T": {
+   "filer_name": "株式会社千葉銀行",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 86088000000.0,
+   "valuation_diff_prior_yen": 66197000000.0,
+   "valuation_diff_change_yen": 19891000000.0
+  },
+  "8411.T": {
+   "filer_name": "株式会社みずほフィナンシャルグループ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 72000000.0,
+   "valuation_diff_prior_yen": 57000000.0,
+   "valuation_diff_change_yen": 15000000.0
+  },
+  "8591.T": {
+   "filer_name": "オリックス株式会社",
+   "accounting_standard": "US GAAP",
+   "valuation_diff_current_yen": 2650000000.0,
+   "valuation_diff_prior_yen": 14104000000.0,
+   "valuation_diff_change_yen": -11454000000.0
+  },
+  "8601.T": {
+   "filer_name": "株式会社大和証券グループ本社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 82205000000.0,
+   "valuation_diff_prior_yen": 51564000000.0,
+   "valuation_diff_change_yen": 30641000000.0
+  },
+  "8604.T": {
+   "filer_name": "野村ホールディングス株式会社",
+   "accounting_standard": "US GAAP",
+   "valuation_diff_current_yen": 37582000000.0,
+   "valuation_diff_prior_yen": 29008000000.0,
+   "valuation_diff_change_yen": 8574000000.0
+  },
+  "8630.T": {
+   "filer_name": "ＳＯＭＰＯホールディングス株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 174313000000.0,
+   "valuation_diff_prior_yen": 174726000000.0,
+   "valuation_diff_change_yen": -413000000.0
+  },
+  "8697.T": {
+   "filer_name": "株式会社日本取引所グループ",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": -161000000.0,
+   "valuation_diff_prior_yen": -180000000.0,
+   "valuation_diff_change_yen": 19000000.0
+  },
+  "8725.T": {
+   "filer_name": "ＭＳ＆ＡＤインシュアランスグループホールディングス株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 48601000000.0,
+   "valuation_diff_prior_yen": 16393000000.0,
+   "valuation_diff_change_yen": 32208000000.0
+  },
+  "8750.T": {
+   "filer_name": "株式会社第一ライフグループ",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 4085000000.0,
+   "valuation_diff_prior_yen": 263000000.0,
+   "valuation_diff_change_yen": 3822000000.0
+  },
+  "8795.T": {
+   "filer_name": "株式会社Ｔ＆Ｄホールディングス",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": -0.0,
+   "valuation_diff_prior_yen": 0.0,
+   "valuation_diff_change_yen": -0.0
+  },
+  "8801.T": {
+   "filer_name": "三井不動産株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 331305000000.0,
+   "valuation_diff_prior_yen": 308736000000.0,
+   "valuation_diff_change_yen": 22569000000.0
+  },
+  "8802.T": {
+   "filer_name": "三菱地所株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 226764000000.0,
+   "valuation_diff_prior_yen": 174307000000.0,
+   "valuation_diff_change_yen": 52457000000.0
+  },
+  "8830.T": {
+   "filer_name": "住友不動産株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 381916000000.0,
+   "valuation_diff_prior_yen": 227006000000.0,
+   "valuation_diff_change_yen": 154910000000.0
+  },
+  "9001.T": {
+   "filer_name": "東武鉄道株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 51795000000.0,
+   "valuation_diff_prior_yen": 36779000000.0,
+   "valuation_diff_change_yen": 15016000000.0
+  },
+  "9005.T": {
+   "filer_name": "東急株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 22861000000.0,
+   "valuation_diff_prior_yen": 21416000000.0,
+   "valuation_diff_change_yen": 1445000000.0
+  },
+  "9007.T": {
+   "filer_name": "小田急電鉄株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 23836000000.0,
+   "valuation_diff_prior_yen": 19045000000.0,
+   "valuation_diff_change_yen": 4791000000.0
+  },
+  "9008.T": {
+   "filer_name": "京王電鉄株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 32175000000.0,
+   "valuation_diff_prior_yen": 26257000000.0,
+   "valuation_diff_change_yen": 5918000000.0
+  },
+  "9009.T": {
+   "filer_name": "京成電鉄株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 9282000000.0,
+   "valuation_diff_prior_yen": 1598000000.0,
+   "valuation_diff_change_yen": 7684000000.0
+  },
+  "9020.T": {
+   "filer_name": "東日本旅客鉄道株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 113744000000.0,
+   "valuation_diff_prior_yen": 86780000000.0,
+   "valuation_diff_change_yen": 26964000000.0
+  },
+  "9021.T": {
+   "filer_name": "西日本旅客鉄道株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 7361000000.0,
+   "valuation_diff_prior_yen": 4508000000.0,
+   "valuation_diff_change_yen": 2853000000.0
+  },
+  "9022.T": {
+   "filer_name": "東海旅客鉄道株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 132764000000.0,
+   "valuation_diff_prior_yen": 81078000000.0,
+   "valuation_diff_change_yen": 51686000000.0
+  },
+  "9064.T": {
+   "filer_name": "ヤマトホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 11687000000.0,
+   "valuation_diff_prior_yen": 7736000000.0,
+   "valuation_diff_change_yen": 3951000000.0
+  },
+  "9101.T": {
+   "filer_name": "日本郵船株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 54568000000.0,
+   "valuation_diff_prior_yen": 54243000000.0,
+   "valuation_diff_change_yen": 325000000.0
+  },
+  "9104.T": {
+   "filer_name": "株式会社　商船三井",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 35394000000.0,
+   "valuation_diff_prior_yen": 35955000000.0,
+   "valuation_diff_change_yen": -561000000.0
+  },
+  "9107.T": {
+   "filer_name": "川崎汽船株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 15514000000.0,
+   "valuation_diff_prior_yen": 11098000000.0,
+   "valuation_diff_change_yen": 4416000000.0
+  },
+  "9201.T": {
+   "filer_name": "日本航空株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 32770000000.0,
+   "valuation_diff_prior_yen": 23616000000.0,
+   "valuation_diff_change_yen": 9154000000.0
+  },
+  "9202.T": {
+   "filer_name": "ＡＮＡホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 35188000000.0,
+   "valuation_diff_prior_yen": 32989000000.0,
+   "valuation_diff_change_yen": 2199000000.0
+  },
+  "9432.T": {
+   "filer_name": "NTT株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 428468000000.0,
+   "valuation_diff_prior_yen": 289242000000.0,
+   "valuation_diff_change_yen": 139226000000.0
+  },
+  "9433.T": {
+   "filer_name": "ＫＤＤＩ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 59885000000.0,
+   "valuation_diff_prior_yen": 45198000000.0,
+   "valuation_diff_change_yen": 14687000000.0
+  },
+  "9434.T": {
+   "filer_name": "ソフトバンク株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 10957000000.0,
+   "valuation_diff_prior_yen": 5829000000.0,
+   "valuation_diff_change_yen": 5128000000.0
+  },
+  "9501.T": {
+   "filer_name": "東京電力ホールディングス株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 21000000.0,
+   "valuation_diff_prior_yen": 1817000000.0,
+   "valuation_diff_change_yen": -1796000000.0
+  },
+  "9502.T": {
+   "filer_name": "中部電力株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 8923000000.0,
+   "valuation_diff_prior_yen": 6582000000.0,
+   "valuation_diff_change_yen": 2341000000.0
+  },
+  "9503.T": {
+   "filer_name": "関西電力株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 151692000000.0,
+   "valuation_diff_prior_yen": 109706000000.0,
+   "valuation_diff_change_yen": 41986000000.0
+  },
+  "9531.T": {
+   "filer_name": "東京瓦斯株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 22587000000.0,
+   "valuation_diff_prior_yen": 18835000000.0,
+   "valuation_diff_change_yen": 3752000000.0
+  },
+  "9532.T": {
+   "filer_name": "大阪瓦斯株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 46459000000.0,
+   "valuation_diff_prior_yen": 35998000000.0,
+   "valuation_diff_change_yen": 10461000000.0
+  },
+  "9602.T": {
+   "filer_name": "東宝株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 56593000000.0,
+   "valuation_diff_prior_yen": 42909000000.0,
+   "valuation_diff_change_yen": 13684000000.0
+  },
+  "9735.T": {
+   "filer_name": "セコム株式会社",
+   "accounting_standard": "Japan GAAP",
+   "valuation_diff_current_yen": 19398000000.0,
+   "valuation_diff_prior_yen": 12768000000.0,
+   "valuation_diff_change_yen": 6630000000.0
+  },
+  "9766.T": {
+   "filer_name": "コナミグループ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 259000000.0,
+   "valuation_diff_prior_yen": 214000000.0,
+   "valuation_diff_change_yen": 45000000.0
+  },
+  "9843.T": {
+   "filer_name": "株式会社ニトリホールディングス",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 9042000000.0,
+   "valuation_diff_prior_yen": 6003000000.0,
+   "valuation_diff_change_yen": 3039000000.0
+  },
+  "9984.T": {
+   "filer_name": "ソフトバンクグループ株式会社",
+   "accounting_standard": "IFRS",
+   "valuation_diff_current_yen": 692682000000.0,
+   "valuation_diff_prior_yen": 536824000000.0,
+   "valuation_diff_change_yen": 155858000000.0
+  }
+ }
+}
