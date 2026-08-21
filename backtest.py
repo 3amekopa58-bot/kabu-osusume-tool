@@ -48,6 +48,11 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     return close > sma100
 
 
+def fetch_nikkei_close(period: str = "5y") -> pd.Series:
+    """レラティブストレングス計算用に日経平均の終値だけを取得する"""
+    return yf.Ticker("^N225").history(period=period)["Close"]
+
+
 def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     """
     ADX（Average Directional Index）。トレンドの向きではなく「強さ」を
@@ -125,6 +130,8 @@ def backtest_ticker(
     market_regime: pd.Series = None,
     volume_filter: bool = False,
     volume_multiple: float = 1.5,
+    nikkei_close: pd.Series = None,
+    rs_period: int = 50,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -133,6 +140,9 @@ def backtest_ticker(
     market_regime を渡した場合、日経平均自体が上昇トレンドの日だけ新規エントリーを許可する。
     volume_filter=True の場合、下半身当日の出来高が直近20日平均の
     volume_multiple倍以上（出来高を伴ったブレイク）の場合だけ採用する。
+    nikkei_close を渡した場合、レラティブストレングス（個別銘柄÷日経平均の
+    比率線）が自身のrs_period日移動平均より上（＝直近で日経平均をアウト
+    パフォームしている）の場合だけ採用する。
 
     エグジット:
       exit_mode="ma"        終値が exit_period 日線を割り込んだら手仕舞い
@@ -150,6 +160,13 @@ def backtest_ticker(
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
 
     regime_aligned = market_regime.reindex(close.index, method="ffill") if market_regime is not None else None
+
+    rs_signal = None
+    if nikkei_close is not None:
+        nikkei_aligned = nikkei_close.reindex(close.index, method="ffill")
+        rs_ratio = close / nikkei_aligned
+        rs_sma = rs_ratio.rolling(rs_period).mean()
+        rs_signal = rs_ratio > rs_sma
 
     trades = []
     in_position = False
@@ -186,6 +203,10 @@ def backtest_ticker(
                     signal = False
                 else:
                     signal = volume.iloc[i] >= vol_avg20.iloc[i] * volume_multiple
+
+            if signal and rs_signal is not None:
+                rs_ok = rs_signal.iloc[i]
+                signal = bool(rs_ok) if pd.notna(rs_ok) else False
 
             if signal:
                 in_position = True
@@ -226,6 +247,7 @@ def main():
     use_market_regime_adx = "marketadx" in sys.argv[2:]
     use_market_regime = "market" in sys.argv[2:] or use_market_regime_ppp or use_market_regime_adx
     use_volume_filter = "volume" in sys.argv[2:]
+    use_rs_filter = "rs" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -239,6 +261,8 @@ def main():
         filter_desc += "+日経平均が上昇トレンドの日のみ"
     if use_volume_filter:
         filter_desc += "+出来高が20日平均の1.5倍以上"
+    if use_rs_filter:
+        filter_desc += "+レラティブストレングスが50日平均より上（日経平均をアウトパフォーム中）"
     exit_desc = "5日線が20日線を下抜け（PPP崩れ）" if exit_mode == "ppp_break" else f"{exit_period}日線割れ"
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
@@ -253,6 +277,11 @@ def main():
         print("日経平均のデータを取得中…")
         market_regime = fetch_market_regime(history_period)
 
+    nikkei_close = None
+    if use_rs_filter:
+        print("レラティブストレングス計算用に日経平均のデータを取得中…")
+        nikkei_close = fetch_nikkei_close(history_period)
+
     all_trades = []
     bh_returns = []
 
@@ -266,6 +295,7 @@ def main():
             trades = backtest_ticker(
                 code, name, hist, exit_period=exit_period, trend_filter=trend_filter,
                 exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
+                nikkei_close=nikkei_close,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -288,7 +318,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "")
+    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "")
     tag = "ppp" if exit_mode == "ppp_break" else f"exit{exit_period}"
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")

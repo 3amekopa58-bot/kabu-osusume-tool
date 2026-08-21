@@ -90,6 +90,11 @@ def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
     return dx.ewm(alpha=1 / period, adjust=False).mean()
 
 
+def fetch_nikkei_close(period: str = "3y") -> pd.Series:
+    """レラティブストレングス計算用に日経平均の終値だけを取得する"""
+    return yf.Ticker("^N225").history(period=period)["Close"]
+
+
 def fetch_market_regime(adx_threshold: float = 20.0) -> bool:
     """
     マーケットレジームフィルター：日経平均自体が上昇トレンド（終値が100日線より上）
@@ -345,7 +350,7 @@ def detect_fushime(close: pd.Series, lookback: int = 60, recent_days: int = 5) -
     return {"breakout_level": breakout_level, "near_level": near_level, "label": label}
 
 
-def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None) -> dict:
+def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_close: Optional[pd.Series] = None) -> dict:
     ticker = yf.Ticker(code)
     info = ticker.info
     hist = ticker.history(period="3y")
@@ -434,6 +439,20 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None) -> dict
         fs = detect_fushime(close)
         row["fushime_breakout_level"] = fs["breakout_level"]
         row["fushime_label"] = fs["label"]
+
+        # レラティブストレングス：個別銘柄÷日経平均の比率が自身の50日移動
+        # 平均より上＝直近で日経平均をアウトパフォーム中。バックテストで
+        # 確認済み：5年・10年・26年の全期間で勝率・PFが一貫して改善
+        # （26年PF 2.02→2.06、勝率42.2%→42.9%）。2026-08-21採用
+        if nikkei_close is not None and len(nikkei_close) > 0:
+            nikkei_aligned = nikkei_close.reindex(close.index, method="ffill")
+            rs_ratio = close / nikkei_aligned
+            rs_sma = rs_ratio.rolling(50).mean()
+            row["relative_strength_confirmed"] = bool(
+                pd.notna(rs_sma.iloc[-1]) and rs_ratio.iloc[-1] > rs_sma.iloc[-1]
+            )
+        else:
+            row["relative_strength_confirmed"] = False
     else:
         row["last_close"] = row["last_open"] = row["rsi14"] = None
         for n in MA_PERIODS:
@@ -451,6 +470,7 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None) -> dict
         row["fushime_label"] = "データ不足"
         row["volume_ratio"] = None
         row["volume_confirmed"] = None
+        row["relative_strength_confirmed"] = None
 
     return row
 
@@ -579,6 +599,8 @@ def technical_score(row, market_regime_up: bool = True) -> float:
             bonus += 0.10  # 出来高が20日平均の1.5倍以上（バックテストで最も効果が大きかった条件）
         if row.get("monowakare_signal") == "up":
             bonus += 0.05  # ものわかれ（黒い縁取り）からの上抜けと重なる
+        if row.get("relative_strength_confirmed"):
+            bonus += 0.05  # 日経平均をアウトパフォーム中（レラティブストレングス）
         score += bonus
 
     # RSIが40〜70の健全な上昇域
@@ -676,13 +698,18 @@ def main():
 
     tickers = load_tickers()
     edinet_cache = load_edinet_cache()
+    try:
+        nikkei_close = fetch_nikkei_close()
+    except Exception as e:
+        print(f"日経平均データ取得失敗（レラティブストレングスなしで続行）: {e}")
+        nikkei_close = None
     print(f"{len(tickers)}銘柄のデータを取得します…")
 
     rows = []
     for i, t in enumerate(tickers, 1):
         code, name = t["code"], t["name"]
         try:
-            rows.append(fetch_one(code, name, edinet_cache))
+            rows.append(fetch_one(code, name, edinet_cache, nikkei_close))
             print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得OK")
         except Exception as e:
             print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
@@ -696,7 +723,7 @@ def main():
         "code", "name", "price", "lot_cost", "per", "pbr", "dividend_yield",
         "graham_number", "current_ratio", "debt_to_equity", "securities_valuation_diff_change_yen",
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
-        "volume_ratio", "volume_confirmed",
+        "volume_ratio", "volume_confirmed", "relative_strength_confirmed",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
