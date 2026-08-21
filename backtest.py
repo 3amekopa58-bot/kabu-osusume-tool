@@ -48,6 +48,49 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     return close > sma100
 
 
+def fetch_sector(code: str) -> str:
+    """業種（GICSセクター、yfinance由来）。取得できない場合は'Unknown'"""
+    try:
+        return yf.Ticker(code).info.get("sector") or "Unknown"
+    except Exception:
+        return "Unknown"
+
+
+def build_sector_close(hist_map: dict, sector_map: dict) -> dict:
+    """
+    セクターごとに、そのセクター内銘柄の正規化株価（開始日を100とする）の
+    単純平均を合成し、自前の「セクター指数」として使う（公式指数ではなく
+    tickers.csvの225銘柄内での近似）。
+    """
+    sector_series = {}
+    for sector in set(sector_map.values()):
+        normalized = []
+        for code, s in sector_map.items():
+            if s != sector:
+                continue
+            hist = hist_map.get(code)
+            if hist is None or hist.empty:
+                continue
+            close = hist["Close"]
+            normalized.append(close / close.iloc[0])
+        if len(normalized) < 3:
+            continue  # 銘柄数が少なすぎるセクターは指数として不安定なため除外
+        combined = pd.concat(normalized, axis=1)
+        sector_series[sector] = combined.mean(axis=1)
+    return sector_series
+
+
+def build_sector_regime(sector_close_map: dict, nikkei_close: pd.Series, period: int = 50) -> dict:
+    """セクター指数÷日経平均の比率が自身のperiod日移動平均より上か（セクター全体が市場をアウトパフォーム中か）"""
+    regime_map = {}
+    for sector, sector_close in sector_close_map.items():
+        nikkei_aligned = nikkei_close.reindex(sector_close.index, method="ffill")
+        ratio = sector_close / nikkei_aligned
+        sma = ratio.rolling(period).mean()
+        regime_map[sector] = ratio > sma
+    return regime_map
+
+
 def fetch_earnings_dates(code: str) -> set:
     """
     決算発表日の集合（date型）を取得する。yfinanceの決算日データは
@@ -161,6 +204,7 @@ def backtest_ticker(
     atr_multiple: float = 2.5,
     earnings_dates: set = None,
     earnings_avoid_days: int = 2,
+    sector_regime: pd.Series = None,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -174,6 +218,8 @@ def backtest_ticker(
     パフォームしている）の場合だけ採用する。
     earnings_dates を渡した場合、決算発表日の前後earnings_avoid_days営業日は
     新規エントリーを見送る（決算ギャップによる値飛びを避ける狙い）。
+    sector_regime を渡した場合、その銘柄が属するセクター全体が日経平均を
+    アウトパフォーム中の日だけ新規エントリーを許可する。
 
     エグジット:
       exit_mode="ma"         終値が exit_period 日線を割り込んだら手仕舞い
@@ -196,6 +242,7 @@ def backtest_ticker(
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
 
     regime_aligned = market_regime.reindex(close.index, method="ffill") if market_regime is not None else None
+    sector_regime_aligned = sector_regime.reindex(close.index, method="ffill") if sector_regime is not None else None
 
     rs_signal = None
     if nikkei_close is not None:
@@ -251,6 +298,10 @@ def backtest_ticker(
                     abs((today - ed).days) <= earnings_avoid_days for ed in earnings_dates
                 )
                 signal = not near_earnings
+
+            if signal and sector_regime_aligned is not None:
+                sector_ok = sector_regime_aligned.iloc[i]
+                signal = bool(sector_ok) if pd.notna(sector_ok) else False
 
             if signal:
                 in_position = True
@@ -308,6 +359,7 @@ def main():
     use_volume_filter = "volume" in sys.argv[2:]
     use_rs_filter = "rs" in sys.argv[2:]
     use_earnings_filter = "earnings" in sys.argv[2:]
+    use_sector_filter = "sector" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -325,6 +377,8 @@ def main():
         filter_desc += "+レラティブストレングスが50日平均より上（日経平均をアウトパフォーム中）"
     if use_earnings_filter:
         filter_desc += "+決算発表日の前後2営業日は見送り"
+    if use_sector_filter:
+        filter_desc += "+所属セクター全体が日経平均をアウトパフォーム中のみ"
     exit_desc = {
         "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
         "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
@@ -344,13 +398,16 @@ def main():
         market_regime = fetch_market_regime(history_period)
 
     nikkei_close = None
-    if use_rs_filter:
+    if use_rs_filter or use_sector_filter:
         print("レラティブストレングス計算用に日経平均のデータを取得中…")
         nikkei_close = fetch_nikkei_close(history_period)
 
-    all_trades = []
-    bh_returns = []
-
+    # セクターフィルターは全銘柄の株価をまず集めてセクター指数を合成する
+    # 必要があるため、先に全銘柄のヒストリー（＋セクター）を取得しておく
+    hist_map = {}
+    name_map = {}
+    sector_map = {}
+    print(f"{len(tickers)}銘柄の株価データを取得中…")
     for i, t in enumerate(tickers, 1):
         code, name = t["code"], t["name"]
         try:
@@ -358,17 +415,39 @@ def main():
             if len(hist) < 120:
                 print(f"  [{i}/{len(tickers)}] {name} ({code}) データ不足のためスキップ")
                 continue
+            hist_map[code] = hist
+            name_map[code] = name
+            if use_sector_filter:
+                sector_map[code] = fetch_sector(code)
+        except Exception as e:
+            print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
+
+    sector_regime_map = {}
+    if use_sector_filter:
+        print("セクター指数を合成中…")
+        sector_close_map = build_sector_close(hist_map, sector_map)
+        sector_regime_map = build_sector_regime(sector_close_map, nikkei_close)
+
+    all_trades = []
+    bh_returns = []
+
+    for i, code in enumerate(hist_map, 1):
+        name = name_map[code]
+        hist = hist_map[code]
+        try:
             earnings_dates = fetch_earnings_dates(code) if use_earnings_filter else None
+            sector_regime = sector_regime_map.get(sector_map.get(code)) if use_sector_filter else None
             trades = backtest_ticker(
                 code, name, hist, exit_period=exit_period, trend_filter=trend_filter,
                 exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
-                nikkei_close=nikkei_close, earnings_dates=earnings_dates,
+                nikkei_close=nikkei_close if use_rs_filter else None, earnings_dates=earnings_dates,
+                sector_regime=sector_regime,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
-            print(f"  [{i}/{len(tickers)}] {name} ({code}) トレード数: {len(trades)}")
+            print(f"  [{i}/{len(hist_map)}] {name} ({code}) トレード数: {len(trades)}")
         except Exception as e:
-            print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
+            print(f"  [{i}/{len(hist_map)}] {name} ({code}) バックテスト失敗: {e}")
 
     if not all_trades:
         print("トレードが1件も発生しませんでした。")
@@ -385,7 +464,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "")
+    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "")
     tag = {"ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr"}.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
