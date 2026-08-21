@@ -1,6 +1,10 @@
 """
-EDINETから「その他有価証券評価差額金」（かぶ1000氏が重視する、保有有価証券の
-含み益の増減）を取得し、data/edinet_valuation_diff.json に保存する。
+EDINETから以下を取得し、data/edinet_valuation_diff.json に保存する。
+  1. 「その他有価証券評価差額金」（かぶ1000氏が重視する、保有有価証券の
+     含み益の増減）
+  2. 「換金性が高い流動資産」の内訳＋総負債（かぶ1000流ネットネット指数の
+     分母を計算するための材料。指数自体＝時価総額÷分母は、時価総額が
+     日々変わるため実行時にscreen.py側で計算する）
 
 有価証券報告書の「個別（親会社単体）」財務諸表から取得する。連結決算が
 IFRSの企業でも個別は日本基準で開示するのが通例のため、連結会計基準に
@@ -36,6 +40,26 @@ EDINET_DOCUMENTS_URL = "https://api.edinet-fsa.go.jp/api/v2/documents.json"
 EDINET_DOCUMENT_URL = "https://api.edinet-fsa.go.jp/api/v2/documents/{doc_id}"
 
 VALUATION_DIFF_TAG = "jppfs_cor:ValuationDifferenceOnAvailableForSaleSecurities"
+
+# かぶ1000流「換金性が高い流動資産」＝現金及び預金＋受取手形及び売掛金＋
+# 有価証券＋投資有価証券－貸倒引当金（かぶ1000_ルール.md「第3章」節参照）。
+# 会社によって別建て/合算タグのどちらかしか使わないため、候補を複数持って
+# 見つかったものを合算する（複数該当しても通常は排他的なので二重計上しない）
+CASH_TAGS = ["jppfs_cor:CashAndDeposits"]
+RECEIVABLES_TAGS = [
+    "jppfs_cor:NotesAndAccountsReceivableTrade",
+    "jppfs_cor:AccountsReceivableTrade",
+    "jppfs_cor:NotesReceivableTrade",
+]
+SECURITIES_TAGS = ["jppfs_cor:Securities", "jppfs_cor:MarketableSecurities"]
+INVESTMENT_SECURITIES_TAGS = ["jppfs_cor:InvestmentSecurities"]
+ALLOWANCE_TAGS = [
+    "jppfs_cor:AllowanceForDoubtfulAccountsCA",
+    "jppfs_cor:AllowanceForDoubtfulAccountsIOAByGroup",
+    "jppfs_cor:AllowanceForDoubtfulAccounts",
+]
+LIABILITIES_TAGS = ["jppfs_cor:Liabilities"]
+NET_NET_CONTEXT = "CurrentYearInstant_NonConsolidatedMember"
 
 # 検索対象期間：3月決算企業の有報提出が集中する時期を広めにカバー
 SEARCH_START = dt.date.today().replace(month=5, day=1)
@@ -105,42 +129,75 @@ def extract_valuation_diff(doc_id: str, api_key: str) -> Optional[dict]:
     reader = csv.reader(content.splitlines(), delimiter="\t")
     rows = list(reader)
 
-    prior = current = None
-    filer_name = None
-    accounting_standard = None
-    for row in rows[1:]:
-        if len(row) < 9:
-            continue
-        if row[0] == VALUATION_DIFF_TAG:
-            if row[2] == "Prior1YearInstant_NonConsolidatedMember":
-                prior = row[8]
-            elif row[2] == "CurrentYearInstant_NonConsolidatedMember":
-                current = row[8]
-        elif row[0] == "jpdei_cor:FilerNameInJapaneseDEI":
-            filer_name = row[8]
-        elif row[0] == "jpdei_cor:AccountingStandardsDEI":
-            accounting_standard = row[8]
-
-    if current is None:
-        return None  # IFRS・米国基準など、このタグが無い
-
     def to_num(v):
         try:
             return float(v)
         except (TypeError, ValueError):
             return None
 
+    prior = current = None
+    filer_name = None
+    accounting_standard = None
+    # 換金性が高い流動資産の各項目（複数の候補タグのうち見つかったものを合算）
+    net_net_parts = {
+        "cash": (CASH_TAGS, 0.0),
+        "receivables": (RECEIVABLES_TAGS, 0.0),
+        "securities": (SECURITIES_TAGS, 0.0),
+        "investment_securities": (INVESTMENT_SECURITIES_TAGS, 0.0),
+        "allowance": (ALLOWANCE_TAGS, 0.0),  # 貸倒引当金はXBRL上すでに負の値
+    }
+    found_parts = {k: False for k in net_net_parts}
+    values = {k: 0.0 for k in net_net_parts}
+    liabilities = None
+
+    for row in rows[1:]:
+        if len(row) < 9:
+            continue
+        tag, context, value = row[0], row[2], row[8]
+        if tag == VALUATION_DIFF_TAG:
+            if context == "Prior1YearInstant_NonConsolidatedMember":
+                prior = value
+            elif context == NET_NET_CONTEXT:
+                current = value
+        elif tag == "jpdei_cor:FilerNameInJapaneseDEI":
+            filer_name = value
+        elif tag == "jpdei_cor:AccountingStandardsDEI":
+            accounting_standard = value
+        elif context == NET_NET_CONTEXT:
+            for key, (tags, _) in net_net_parts.items():
+                if tag in tags:
+                    v = to_num(value)
+                    if v is not None:
+                        values[key] += v
+                        found_parts[key] = True
+            if tag in LIABILITIES_TAGS:
+                liabilities = to_num(value)
+
+    if current is None:
+        return None  # IFRS・米国基準など、このタグが無い
+
     current_v = to_num(current)
     prior_v = to_num(prior)
     change = (current_v - prior_v) if (current_v is not None and prior_v is not None) else None
 
-    return {
+    result = {
         "filer_name": filer_name,
         "accounting_standard": accounting_standard,
         "valuation_diff_current_yen": current_v,
         "valuation_diff_prior_yen": prior_v,
         "valuation_diff_change_yen": change,
     }
+
+    # ネットネット指数の分母（換金性が高い流動資産－総負債）。現金・投資
+    # 有価証券のどちらかすら取れていなければ、企業の実態を表さない不完全な
+    # 値になるため計算しない（無理に0扱いにしない）
+    if liabilities is not None and (found_parts["cash"] or found_parts["investment_securities"]):
+        liquid_assets = sum(values.values())
+        result["net_net_liquid_assets_yen"] = liquid_assets
+        result["net_net_liabilities_yen"] = liabilities
+        result["net_net_denominator_yen"] = liquid_assets - liabilities
+
+    return result
 
 
 def main():
@@ -174,7 +231,7 @@ def main():
         json.dump(
             {
                 "generated_at": dt.date.today().isoformat(),
-                "note": "その他有価証券評価差額金（日本基準開示企業のみ・IFRS企業は対象外）。かぶ1000氏の考え方に基づく参考指標。",
+                "note": "その他有価証券評価差額金＋ネットネット指数の分母（換金性が高い流動資産－総負債）。日本基準開示企業のみ・IFRS企業は対象外。かぶ1000氏の考え方に基づく参考指標。",
                 "data": result,
             },
             f,
