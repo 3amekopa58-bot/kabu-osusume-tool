@@ -48,6 +48,17 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     return close > sma100
 
 
+def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """ATR（Average True Range）。Wilderの平滑化で計算する、値動きの荒さの指標"""
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
+
+
 def fetch_nikkei_close(period: str = "5y") -> pd.Series:
     """レラティブストレングス計算用に日経平均の終値だけを取得する"""
     return yf.Ticker("^N225").history(period=period)["Close"]
@@ -132,6 +143,7 @@ def backtest_ticker(
     volume_multiple: float = 1.5,
     nikkei_close: pd.Series = None,
     rs_period: int = 50,
+    atr_multiple: float = 2.5,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -145,16 +157,21 @@ def backtest_ticker(
     パフォームしている）の場合だけ採用する。
 
     エグジット:
-      exit_mode="ma"        終値が exit_period 日線を割り込んだら手仕舞い
-      exit_mode="ppp_break" 5日線が20日線を下抜けたら手仕舞い（PPPの並びが崩れる＝一番緩い条件）
+      exit_mode="ma"         終値が exit_period 日線を割り込んだら手仕舞い
+      exit_mode="ppp_break"  5日線が20日線を下抜けたら手仕舞い（PPPの並びが崩れる＝一番緩い条件）
+      exit_mode="atr_trail"  保有中の最高値から atr_multiple×ATR 下落したら手仕舞い（トレーリングストップ）
+      exit_mode="ppp_or_atr" 上記2つのどちらか早い方で手仕舞い
     """
     close = hist["Close"]
     open_ = hist["Open"]
+    high = hist["High"]
+    low = hist["Low"]
     volume = hist["Volume"]
     sma5 = close.rolling(5).mean()
     sma20 = close.rolling(20).mean()
     sma_exit = close.rolling(exit_period).mean()
     vol_avg20 = volume.rolling(20).mean()
+    atr = calc_atr(high, low, close) if exit_mode in ("atr_trail", "ppp_or_atr") else None
 
     ma_periods = (5, 10, 20, 50, 100)
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
@@ -171,6 +188,7 @@ def backtest_ticker(
     trades = []
     in_position = False
     entry_price = entry_date = None
+    highest_since_entry = None
 
     for i in range(MIN_WARMUP_DAYS, len(close)):
         if pd.isna(sma5.iloc[i]) or pd.isna(sma5.iloc[i - 4]) or pd.isna(sma_exit.iloc[i]) or pd.isna(sma20.iloc[i]):
@@ -212,8 +230,22 @@ def backtest_ticker(
                 in_position = True
                 entry_price = float(c)
                 entry_date = close.index[i]
+                highest_since_entry = float(c)
         else:
-            should_exit = (sma5.iloc[i] < sma20.iloc[i]) if exit_mode == "ppp_break" else (c < sma_exit.iloc[i])
+            highest_since_entry = max(highest_since_entry, float(c))
+            ppp_break_hit = sma5.iloc[i] < sma20.iloc[i]
+            atr_hit = (
+                pd.notna(atr.iloc[i]) and c < highest_since_entry - atr_multiple * atr.iloc[i]
+                if atr is not None else False
+            )
+            if exit_mode == "ppp_break":
+                should_exit = ppp_break_hit
+            elif exit_mode == "atr_trail":
+                should_exit = atr_hit
+            elif exit_mode == "ppp_or_atr":
+                should_exit = ppp_break_hit or atr_hit
+            else:
+                should_exit = c < sma_exit.iloc[i]
             if should_exit:
                 exit_price = float(c)
                 exit_date = close.index[i]
@@ -240,8 +272,9 @@ def buy_and_hold_return(hist: pd.DataFrame) -> float:
 
 def main():
     arg1 = sys.argv[1] if len(sys.argv) > 1 else "5"
-    exit_mode = "ppp_break" if arg1 == "ppp" else "ma"
-    exit_period = 20 if exit_mode == "ppp_break" else int(arg1)
+    exit_mode_map = {"ppp": "ppp_break", "atrtrail": "atr_trail", "pporatr": "ppp_or_atr"}
+    exit_mode = exit_mode_map.get(arg1, "ma")
+    exit_period = 20 if exit_mode != "ma" else int(arg1)
     trend_filter = "trend" in sys.argv[2:]
     use_market_regime_ppp = "marketppp" in sys.argv[2:]
     use_market_regime_adx = "marketadx" in sys.argv[2:]
@@ -263,7 +296,11 @@ def main():
         filter_desc += "+出来高が20日平均の1.5倍以上"
     if use_rs_filter:
         filter_desc += "+レラティブストレングスが50日平均より上（日経平均をアウトパフォーム中）"
-    exit_desc = "5日線が20日線を下抜け（PPP崩れ）" if exit_mode == "ppp_break" else f"{exit_period}日線割れ"
+    exit_desc = {
+        "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
+        "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
+        "ppp_or_atr": "PPP崩れ or トレーリングストップの早い方",
+    }.get(exit_mode, f"{exit_period}日線割れ")
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
@@ -319,7 +356,7 @@ def main():
     else:
         market_suffix = ""
     suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "")
-    tag = "ppp" if exit_mode == "ppp_break" else f"exit{exit_period}"
+    tag = {"ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr"}.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
 
