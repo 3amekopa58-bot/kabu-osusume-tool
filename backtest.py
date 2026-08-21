@@ -48,6 +48,21 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     return close > sma100
 
 
+def fetch_earnings_dates(code: str) -> set:
+    """
+    決算発表日の集合（date型）を取得する。yfinanceの決算日データは
+    過去5年分程度しか遡れないため、このフィルターは5年バックテストのみで
+    検証する（10年・26年での頑健性チェックはできない）。
+    """
+    try:
+        ed = yf.Ticker(code).earnings_dates
+        if ed is None or ed.empty:
+            return set()
+        return {d.date() for d in ed.index}
+    except Exception:
+        return set()
+
+
 def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     """ATR（Average True Range）。Wilderの平滑化で計算する、値動きの荒さの指標"""
     prev_close = close.shift(1)
@@ -144,6 +159,8 @@ def backtest_ticker(
     nikkei_close: pd.Series = None,
     rs_period: int = 50,
     atr_multiple: float = 2.5,
+    earnings_dates: set = None,
+    earnings_avoid_days: int = 2,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -155,6 +172,8 @@ def backtest_ticker(
     nikkei_close を渡した場合、レラティブストレングス（個別銘柄÷日経平均の
     比率線）が自身のrs_period日移動平均より上（＝直近で日経平均をアウト
     パフォームしている）の場合だけ採用する。
+    earnings_dates を渡した場合、決算発表日の前後earnings_avoid_days営業日は
+    新規エントリーを見送る（決算ギャップによる値飛びを避ける狙い）。
 
     エグジット:
       exit_mode="ma"         終値が exit_period 日線を割り込んだら手仕舞い
@@ -226,6 +245,13 @@ def backtest_ticker(
                 rs_ok = rs_signal.iloc[i]
                 signal = bool(rs_ok) if pd.notna(rs_ok) else False
 
+            if signal and earnings_dates:
+                today = close.index[i].date()
+                near_earnings = any(
+                    abs((today - ed).days) <= earnings_avoid_days for ed in earnings_dates
+                )
+                signal = not near_earnings
+
             if signal:
                 in_position = True
                 entry_price = float(c)
@@ -281,6 +307,7 @@ def main():
     use_market_regime = "market" in sys.argv[2:] or use_market_regime_ppp or use_market_regime_adx
     use_volume_filter = "volume" in sys.argv[2:]
     use_rs_filter = "rs" in sys.argv[2:]
+    use_earnings_filter = "earnings" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -296,6 +323,8 @@ def main():
         filter_desc += "+出来高が20日平均の1.5倍以上"
     if use_rs_filter:
         filter_desc += "+レラティブストレングスが50日平均より上（日経平均をアウトパフォーム中）"
+    if use_earnings_filter:
+        filter_desc += "+決算発表日の前後2営業日は見送り"
     exit_desc = {
         "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
         "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
@@ -329,10 +358,11 @@ def main():
             if len(hist) < 120:
                 print(f"  [{i}/{len(tickers)}] {name} ({code}) データ不足のためスキップ")
                 continue
+            earnings_dates = fetch_earnings_dates(code) if use_earnings_filter else None
             trades = backtest_ticker(
                 code, name, hist, exit_period=exit_period, trend_filter=trend_filter,
                 exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
-                nikkei_close=nikkei_close,
+                nikkei_close=nikkei_close, earnings_dates=earnings_dates,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -355,7 +385,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "")
+    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "")
     tag = {"ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr"}.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
