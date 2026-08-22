@@ -29,6 +29,11 @@ OUTPUT_DIR = BASE_DIR / "output"
 HISTORY_PERIOD = "5y"
 MIN_WARMUP_DAYS = 10  # 5日線の傾き判定に必要な最低本数
 
+# 1トレードのリターンがこれを超えたら警告を出す（yfinanceの株式分割データ
+# 不整合等による異常値を検知するため。2026-08-22、東京海上HD(8766)の
+# 2005年データで実際に約18,700%という不正な値を検出した経緯あり）
+SUSPICIOUS_RETURN_THRESHOLD = 500.0
+
 
 def load_tickers():
     with open(TICKERS_CSV, encoding="utf-8-sig") as f:
@@ -205,6 +210,7 @@ def backtest_ticker(
     earnings_dates: set = None,
     earnings_avoid_days: int = 2,
     sector_regime: pd.Series = None,
+    time_stop_days: int = 60,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -226,6 +232,8 @@ def backtest_ticker(
       exit_mode="ppp_break"  5日線が20日線を下抜けたら手仕舞い（PPPの並びが崩れる＝一番緩い条件）
       exit_mode="atr_trail"  保有中の最高値から atr_multiple×ATR 下落したら手仕舞い（トレーリングストップ）
       exit_mode="ppp_or_atr" 上記2つのどちらか早い方で手仕舞い
+      exit_mode="time_stop"  保有日数が time_stop_days に達したら手仕舞い（純粋なタイムストップ）
+      exit_mode="ppp_or_time" PPP崩れ or タイムストップの早い方で手仕舞い
     """
     close = hist["Close"]
     open_ = hist["Open"]
@@ -315,12 +323,17 @@ def backtest_ticker(
                 pd.notna(atr.iloc[i]) and c < highest_since_entry - atr_multiple * atr.iloc[i]
                 if atr is not None else False
             )
+            time_hit = (close.index[i] - entry_date).days >= time_stop_days
             if exit_mode == "ppp_break":
                 should_exit = ppp_break_hit
             elif exit_mode == "atr_trail":
                 should_exit = atr_hit
             elif exit_mode == "ppp_or_atr":
                 should_exit = ppp_break_hit or atr_hit
+            elif exit_mode == "time_stop":
+                should_exit = time_hit
+            elif exit_mode == "ppp_or_time":
+                should_exit = ppp_break_hit or time_hit
             else:
                 should_exit = c < sma_exit.iloc[i]
             if should_exit:
@@ -349,7 +362,10 @@ def buy_and_hold_return(hist: pd.DataFrame) -> float:
 
 def main():
     arg1 = sys.argv[1] if len(sys.argv) > 1 else "5"
-    exit_mode_map = {"ppp": "ppp_break", "atrtrail": "atr_trail", "pporatr": "ppp_or_atr"}
+    exit_mode_map = {
+        "ppp": "ppp_break", "atrtrail": "atr_trail", "pporatr": "ppp_or_atr",
+        "timestop": "time_stop", "pportime": "ppp_or_time",
+    }
     exit_mode = exit_mode_map.get(arg1, "ma")
     exit_period = 20 if exit_mode != "ma" else int(arg1)
     trend_filter = "trend" in sys.argv[2:]
@@ -383,6 +399,8 @@ def main():
         "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
         "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
         "ppp_or_atr": "PPP崩れ or トレーリングストップの早い方",
+        "time_stop": "保有60日で強制手仕舞い（タイムストップ）",
+        "ppp_or_time": "PPP崩れ or タイムストップの早い方",
     }.get(exit_mode, f"{exit_period}日線割れ")
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
@@ -455,6 +473,14 @@ def main():
 
     df = pd.DataFrame(all_trades)
 
+    suspicious = df[df["return_pct"].abs() > SUSPICIOUS_RETURN_THRESHOLD]
+    if not suspicious.empty:
+        print(f"\n⚠️  リターンが{SUSPICIOUS_RETURN_THRESHOLD:.0f}%を超えるトレードが{len(suspicious)}件あります。"
+              "yfinanceの株式分割データ不整合等による異常値の可能性があるため、手動で確認してください：")
+        for _, row in suspicious.iterrows():
+            print(f"   {row['code']} {row['name']} {row['entry_date']}→{row['exit_date']} "
+                  f"return={row['return_pct']:.1f}% (entry={row['entry_price']:.2f}, exit={row['exit_price']:.2f})")
+
     OUTPUT_DIR.mkdir(exist_ok=True)
     if use_market_regime_ppp:
         market_suffix = "_marketppp"
@@ -465,7 +491,10 @@ def main():
     else:
         market_suffix = ""
     suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "")
-    tag = {"ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr"}.get(exit_mode, f"exit{exit_period}")
+    tag = {
+        "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
+        "time_stop": "timestop", "ppp_or_time": "pportime",
+    }.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
 
