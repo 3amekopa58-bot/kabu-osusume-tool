@@ -36,6 +36,11 @@ MIN_WARMUP_DAYS = 10  # 5日線の傾き判定に必要な最低本数
 # 2005年データで実際に約18,700%という不正な値を検出した経緯あり）
 SUSPICIOUS_RETURN_THRESHOLD = 500.0
 
+# 1日でこれを超える値動きは実在しないので、株式分割データの不整合とみなして
+# その銘柄を検証対象から外す（東京海上HD/8766は初値が-0.18円、日本航空/9201は
+# 1日で191,400%と記録されている）。portfolio_sim.py もこの値を使う
+MAX_PLAUSIBLE_DAILY_MOVE = 0.8
+
 
 def load_tickers(path=None):
     """既定は日経225（tickers.csv）。universe.csv 等を渡せば対象を差し替えられる。"""
@@ -811,11 +816,21 @@ def load_price_data(tickers, history_period: str, use_sector_filter: bool = Fals
     print(f"{len(tickers)}銘柄の株価データを用意中…")
     fetched = fetch_histories([t["code"] for t in tickers], period=history_period)
     hist_map, name_map, sector_map, short_data = {}, {}, {}, 0
+    excluded = []
     for t in tickers:
         code, name = t["code"], t["name"]
         hist = fetched.get(code)
         if hist is None or len(hist) < 120:
             short_data += 1
+            continue
+        # 汚染データの除外。yfinanceの株式分割データ不整合により、実際には
+        # あり得ない値動きが記録されている銘柄がある（東京海上HD/8766は
+        # 初値が-0.18円、日本航空/9201は1日で191,400%）。以前は
+        # portfolio_sim.py だけがこれを除外し、backtest.py は警告を出すだけ
+        # だったため、26年バックテストの平均リターンとPFが過大に出ていた
+        daily = hist["Close"].pct_change().abs()
+        if (daily > MAX_PLAUSIBLE_DAILY_MOVE).any():
+            excluded.append(f"{name}({code}) {daily.idxmax().date()} に{daily.max()*100:,.0f}%変動")
             continue
         hist_map[code] = hist
         name_map[code] = name
@@ -823,6 +838,12 @@ def load_price_data(tickers, history_period: str, use_sector_filter: bool = Fals
             sector_map[code] = fetch_sector(code)
     if short_data:
         print(f"  データ不足で{short_data}銘柄をスキップしました")
+    if excluded:
+        print(f"  ⚠️ 分割データ不整合の疑いで{len(excluded)}銘柄を除外しました：")
+        for e in excluded[:10]:
+            print(f"     {e}")
+        if len(excluded) > 10:
+            print(f"     …ほか{len(excluded) - 10}銘柄")
     return hist_map, name_map, sector_map
 
 

@@ -30,6 +30,7 @@ import pandas as pd
 import yfinance as yf
 
 from backtest import (
+    MAX_PLAUSIBLE_DAILY_MOVE,
     SUSPICIOUS_RETURN_THRESHOLD,
     fetch_market_regime_adx,
     fetch_nikkei_close,
@@ -52,7 +53,6 @@ RANDOM_TRIALS = 5
 # 誤った分割比率500が記録されており、それ以前の株価が1/500になっている等）。
 # 日経225の大型株が1日で+80%動くことは実質ないため、誤検知の心配は小さい。
 # 資産推移そのものが壊れるため、集計時の除外ではなく読み込み時に落とす。
-MAX_PLAUSIBLE_DAILY_MOVE = 0.8
 
 # 余剰資金を日経ETFで運用する場合（parkindex）のコスト。
 # 個別株を買うときはその分だけETFを売り、売ったときはETFを買い戻すため、
