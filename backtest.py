@@ -335,6 +335,7 @@ def backtest_ticker(
     stop_loss_pct: float = 10.0,
     entry_mode: str = "kahanshin",
     pullback_tolerance: float = 2.0,
+    cost_pct: float = 0.0,
 ) -> list[dict]:
     """
     エントリー:
@@ -585,7 +586,8 @@ def backtest_ticker(
             if should_exit:
                 exit_price = float(c)
                 exit_date = close.index[i]
-                ret_pct = (exit_price - entry_price) / entry_price * 100
+                # 往復の取引コスト（手数料＋スリッページ）を控除した実質リターン
+                ret_pct = (exit_price - entry_price) / entry_price * 100 - cost_pct
                 trades.append({
                     "code": code,
                     "name": name,
@@ -644,6 +646,10 @@ def main():
         if a in ("kahanshin", "pullback", "either", "ichimoku", "macd", "bandwalk")
     ]
     entry_mode = "+".join(entry_parts) if entry_parts else "kahanshin"
+    # 往復の取引コスト（手数料＋スリッページ）。"cost20" で0.20%を意味する
+    # （既定は0＝コスト無視。過去の検証結果と数値を比較できるようにするため）
+    cost_args = [a for a in sys.argv[2:] if a.startswith("cost") and a[4:].isdigit()]
+    cost_pct = float(cost_args[0][4:]) / 100 if cost_args else 0.0
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -671,6 +677,8 @@ def main():
         filter_desc += "+直近10日以内にたくり線→抱き線の複合シグナルあり"
     if use_fib_filter:
         filter_desc += "+押しの深さがフィボナッチ25〜65%の範囲内"
+    if cost_pct:
+        filter_desc += f"／往復コスト{cost_pct:.2f}%を控除"
     exit_desc = {
         "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
         "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
@@ -751,7 +759,7 @@ def main():
                 sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
                 candle_filter=use_candle_filter, fib_filter=use_fib_filter,
                 stop_loss_pct=stop_loss_pct, time_stop_days=time_stop_days,
-                entry_mode=entry_mode,
+                entry_mode=entry_mode, cost_pct=cost_pct,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -782,7 +790,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
+    suffix = (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
