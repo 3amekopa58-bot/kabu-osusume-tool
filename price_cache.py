@@ -106,7 +106,11 @@ def fetch_histories(codes, period: str = "5y", verbose: bool = True,
                     continue
                 if d.index.tz is not None:
                     d.index = d.index.tz_localize(None)
-                d.to_csv(_cache_path(code, period))
+                # 有効数字を明示しないと、CSVに書き出す段階で株価の下位桁が
+                # 落ちる。1e-4円程度のわずかな差でも、日次で資金を回す
+                # portfolio_sim.py では買う銘柄の選択が変わり、27年で
+                # 20pt以上リターンがずれる（2026-08-29に実測）
+                d.to_csv(_cache_path(code, period), float_format="%.12g")
                 result[code] = d
             except Exception:
                 pass
