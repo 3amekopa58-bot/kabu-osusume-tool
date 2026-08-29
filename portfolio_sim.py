@@ -53,6 +53,14 @@ RANDOM_TRIALS = 5
 # 資産推移そのものが壊れるため、集計時の除外ではなく読み込み時に落とす。
 MAX_PLAUSIBLE_DAILY_MOVE = 0.8
 
+# 余剰資金を日経ETFで運用する場合（parkindex）のコスト。
+# 個別株を買うときはその分だけETFを売り、売ったときはETFを買い戻すため、
+# 個別株の売買のたびに片道分のETF売買コストがかかる（27年で876トレード
+# ＝月2.7回程度なので、日々売買するような非現実的な頻度にはならない）。
+ETF_TRADE_COST_PCT = 0.05   # ETFの片道売買コスト（スプレッド＋手数料）
+ETF_EXPENSE_RATIO = 0.0015  # 信託報酬 年0.15%
+TRADING_DAYS_PER_YEAR = 252
+
 
 def load_tickers():
     with open(TICKERS_CSV, encoding="utf-8-sig") as f:
@@ -122,9 +130,11 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
     )
 
     for day in calendar:
-        # 余剰資金をインデックスで運用する場合、日々その分だけ増減させる
+        # 余剰資金をインデックスで運用する場合、日々その分だけ増減させ、
+        # 信託報酬を日割りで差し引く
         if index_ret is not None:
             capital *= (1 + float(index_ret.get(day, 0.0)))
+            capital *= (1 - ETF_EXPENSE_RATIO / TRADING_DAYS_PER_YEAR)
         # --- 1) 手仕舞い判定（保有60日 or 買値-10%） ---
         for code in list(positions.keys()):
             pos = positions[code]
@@ -135,7 +145,11 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
             held_days = (day - pos["entry_date"]).days
             loss_pct = (price - pos["entry_price"]) / pos["entry_price"] * 100
             if held_days >= HOLDING_DAYS_LIMIT or loss_pct <= -STOP_LOSS_PCT:
-                capital += price * pos["shares"]
+                proceeds = price * pos["shares"]
+                # 売却代金をETFに戻す際の買付コスト
+                if index_ret is not None:
+                    proceeds -= proceeds * ETF_TRADE_COST_PCT / 100
+                capital += proceeds
                 trades.append({
                     "code": code, "name": name_map[code],
                     "entry_date": pos["entry_date"].date(), "exit_date": day.date(),
@@ -164,6 +178,9 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
 
             for code, price, _ in candidates:
                 cost = price * LOT_SIZE
+                # 個別株を買う原資はETFを売って作るため、その売却コストも要る
+                if index_ret is not None:
+                    cost += price * LOT_SIZE * ETF_TRADE_COST_PCT / 100
                 if cost <= capital:
                     capital -= cost
                     positions[code] = {
@@ -268,7 +285,8 @@ def main():
                           & (nikkei_close.index <= calendar[-1])]
     nikkei_ret = (nk.iloc[-1] - nk.iloc[0]) / nk.iloc[0] * 100
 
-    mode = "・余剰資金は日経ETFで運用" if park_index else ""
+    mode = (f"・余剰資金は日経ETFで運用（ETF売買{ETF_TRADE_COST_PCT}%片道・"
+            f"信託報酬年{ETF_EXPENSE_RATIO*100:.2f}%込み）") if park_index else ""
     print(f"\n=== ポートフォリオシミュレーション結果（{rule}{mode}）===")
     print(f"対象期間: {calendar[0].date()} 〜 {calendar[-1].date()}")
     print(f"初期資金: {INITIAL_CAPITAL:,}円 → 最終資産: {r['final']:,.0f}円")
