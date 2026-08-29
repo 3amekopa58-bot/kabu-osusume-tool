@@ -294,6 +294,9 @@ def backtest_ticker(
     エントリー:
       entry_mode="kahanshin"（既定）下半身シグナル（5日線が上向き＋陽線で
         5日線を上抜け）。ブレイクした瞬間を買う順張り型。
+      entry_mode="either" 下半身と押し目買いのどちらかが点灯したら買う。
+        両方式の良いところを取れるか（＝シグナル件数を増やしつつ勝率を
+        保てるか）を検証するための併用モード。
       entry_mode="pullback" 押し目買い型（グランビルの法則②③由来）。
         上昇トレンド中に株価が20日線まで押し（安値が20日線＋
         pullback_tolerance%以内まで下落）、当日陽線で20日線より上に
@@ -397,16 +400,22 @@ def backtest_ticker(
         prev_c, prev_s = close.iloc[i - 1], sma5.iloc[i - 1]
 
         if not in_position:
+            # 押し目買い：上昇トレンド中に20日線まで押して反発した日を買う
+            pullback_sig = bool(
+                low.iloc[i] <= sma20.iloc[i] * (1 + pullback_tolerance / 100)
+                and c > o and c > sma20.iloc[i]
+            )
+            # 下半身：5日線が上向き＋陽線で5日線を上抜けた日を買う
+            kahanshin_sig = bool(
+                prev_c <= prev_s and c > sma5.iloc[i]
+                and c > o and sma5.iloc[i] > sma5.iloc[i - 4]
+            )
             if entry_mode == "pullback":
-                # 押し目買い：上昇トレンド中に20日線まで押して反発した日を買う
-                touched_ma = low.iloc[i] <= sma20.iloc[i] * (1 + pullback_tolerance / 100)
-                bounced = c > o and c > sma20.iloc[i]
-                signal = bool(touched_ma and bounced)
+                signal = pullback_sig
+            elif entry_mode == "either":
+                signal = kahanshin_sig or pullback_sig
             else:
-                crossed_above = prev_c <= prev_s and c > sma5.iloc[i]
-                is_bullish = c > o
-                slope_up = sma5.iloc[i] > sma5.iloc[i - 4]
-                signal = crossed_above and is_bullish and slope_up
+                signal = kahanshin_sig
 
             if signal and trend_filter:
                 if pd.isna(sma[100].iloc[i]):
@@ -565,8 +574,13 @@ def main():
     # タイムストップの日数は "ts30" / "ts90" のような引数で上書きできる（既定は60日）
     ts_args = [a for a in sys.argv[2:] if a.startswith("ts") and a[2:].isdigit()]
     time_stop_days = int(ts_args[0][2:]) if ts_args else 60
-    # "pullback" を付けるとエントリーを下半身から押し目買い型に切り替える
-    entry_mode = "pullback" if "pullback" in sys.argv[2:] else "kahanshin"
+    # "pullback" で押し目買い型、"either" で「下半身 or 押し目買い」に切り替える
+    if "either" in sys.argv[2:]:
+        entry_mode = "either"
+    elif "pullback" in sys.argv[2:]:
+        entry_mode = "pullback"
+    else:
+        entry_mode = "kahanshin"
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -609,7 +623,10 @@ def main():
         "time_or_sl": f"タイムストップ{time_stop_days}日 or 損切り-{stop_loss_pct:.0f}%の早い方",
         "time_dev_sl": f"タイムストップ{time_stop_days}日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
     }.get(exit_mode, f"{exit_period}日線割れ")
-    entry_desc = "押し目買い（上昇トレンド中に20日線まで押して反発）" if entry_mode == "pullback" else "下半身"
+    entry_desc = {
+        "pullback": "押し目買い（上昇トレンド中に20日線まで押して反発）",
+        "either": "下半身 or 押し目買い（どちらか点灯で買い）",
+    }.get(entry_mode, "下半身")
     print(f"{len(tickers)}銘柄で{entry_desc}バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
@@ -701,7 +718,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_pullback" if entry_mode == "pullback" else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
+    suffix = (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",

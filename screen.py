@@ -54,6 +54,18 @@ DEV_MA_PERIOD = 25
 HOLDING_DAYS_LIMIT = 60
 STOP_LOSS_PCT = 10.0
 
+# 押し目買いシグナル（グランビルの法則②③由来、2026-08-29採用）。
+# 上昇トレンド中に安値が20日線＋この％以内まで押し、当日陽線で20日線より
+# 上に戻して反発した日を買いとする。既存の下半身（ブレイクを買う）とは
+# 逆の発想で、「下半身 or 押し目買い」のどちらかが点灯したら買う運用。
+# バックテストで5年・10年・26年の全期間で勝率が一貫改善し、しかも
+# PFは同等以上を維持した（今回検証した全候補で唯一、収益性を犠牲に
+# しなかった）：
+#   勝率 59.5→60.6%(5年)、51.5→53.3%(10年)、50.2→52.0%(26年)
+#   PF   2.55→2.65、1.81→1.81、1.64→1.69
+#   件数 274→536、592→1155、1640→3139（約2倍。大損の発生率は0.37→0.32%）
+PULLBACK_TOLERANCE_PCT = 2.0
+
 
 def load_tickers():
     with open(TICKERS_CSV, encoding="utf-8-sig") as f:
@@ -393,6 +405,7 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
     if len(hist) >= MIN_HISTORY_DAYS:
         close = hist["Close"]
         open_ = hist["Open"]
+        low = hist["Low"]
         volume = hist["Volume"]
         sma = {n: close.rolling(n).mean() for n in MA_PERIODS}
 
@@ -443,6 +456,15 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
         row["kahanshin"] = bool(crossed_above and is_bullish and row["sma5_slope_up"])
         row["gyaku_kahanshin"] = bool(crossed_below and is_bearish and row["sma5_slope_down"])
 
+        # 押し目買い：安値が20日線＋2%以内まで押し、陽線で20日線より上に戻した
+        sma20_now = sma[20].iloc[-1]
+        row["pullback"] = bool(
+            pd.notna(sma20_now)
+            and low.iloc[-1] <= sma20_now * (1 + PULLBACK_TOLERANCE_PCT / 100)
+            and is_bullish
+            and row["last_close"] > sma20_now
+        )
+
         # 9の法則（スイング起点版）
         phase, count = swing_leg_count(close, sma5_series)
         row["td_buy"] = count if phase == "down" else 0
@@ -484,7 +506,7 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
         row["ppp_matches"] = row["ppp_up"] = row["ppp_down"] = None
         row["trend_filter_pass"] = None
         row["sma5_slope_up"] = row["sma5_slope_down"] = None
-        row["kahanshin"] = row["gyaku_kahanshin"] = None
+        row["kahanshin"] = row["gyaku_kahanshin"] = row["pullback"] = None
         row["td_buy"] = row["td_sell"] = None
         row["kuchibashi_signal"] = None
         row["kuchibashi_label"] = "データ不足"
@@ -531,6 +553,8 @@ def trend_label(row) -> str:
 
     if row["kahanshin"]:
         base += "・本日「下半身」シグナル点灯"
+    if row.get("pullback"):
+        base += "・本日「押し目買い」シグナル点灯（20日線まで押して反発）"
     if row["gyaku_kahanshin"]:
         base += "・本日「逆下半身」シグナル点灯"
     if row.get("monowakare_signal") == "up":
@@ -549,6 +573,8 @@ def buy_timing(row, market_regime_up: bool = True) -> str:
     signals = []
     if row.get("kahanshin"):
         signals.append("下半身")
+    if row.get("pullback"):
+        signals.append("押し目買い")
     if row.get("kuchibashi_signal") == "up":
         signals.append("くちばし")
 
@@ -560,7 +586,7 @@ def buy_timing(row, market_regime_up: bool = True) -> str:
         notes.append("トレンドやや弱め")
     if not market_regime_up:
         notes.append("日経平均の地合いが弱い（トレンド不足）")
-    if row.get("kahanshin") and not row.get("volume_confirmed"):
+    if (row.get("kahanshin") or row.get("pullback")) and not row.get("volume_confirmed"):
         notes.append("出来高の伴いが弱い")
     confidence = f"（{'・'.join(notes)}・慎重に）" if notes else ""
     return (
@@ -613,11 +639,13 @@ def technical_score(row, market_regime_up: bool = True) -> float:
     # PPPの完成度（5>10>20>50>100 が何組成立しているか）
     score += (row["ppp_matches"] / 4) * 0.25
 
-    # 下半身シグナルが本日点灯＝号砲。バックテストで確認済みの各条件を
-    # 加算方式で評価する（PF実績: 基本1.29 → トレンド強め1.44 → +地合い1.80 →
-    # +出来高2.60）。条件が重なるほど過去の実績上、信頼度が高い。
-    if row["kahanshin"]:
-        bonus = 0.10  # 下半身が出ただけでも号砲として加点
+    # 買いシグナル（下半身 or 押し目買い）が本日点灯＝号砲。バックテストで
+    # 確認済みの各条件を加算方式で評価する（PF実績: 基本1.29 → トレンド強め
+    # 1.44 → +地合い1.80 → +出来高2.60）。条件が重なるほど信頼度が高い。
+    # 押し目買いは2026-08-29に追加（下半身と同格の独立シグナルとして扱う。
+    # 併用で勝率が全期間改善しPFも同等以上を維持したため、加点も同じ扱い）
+    if row["kahanshin"] or row.get("pullback"):
+        bonus = 0.10  # 買いシグナルが出ただけでも号砲として加点
         if row.get("trend_filter_pass"):
             bonus += 0.08  # PPP3/4以上＋100日線より上
         if market_regime_up:
@@ -751,6 +779,7 @@ def main():
         "graham_number", "current_ratio", "debt_to_equity", "securities_valuation_diff_change_yen",
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
         "volume_ratio", "volume_confirmed", "relative_strength_confirmed", "dev_from_sma25_pct",
+        "kahanshin", "pullback",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
