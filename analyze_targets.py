@@ -24,6 +24,8 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+from price_cache import fetch_histories
+
 BASE_DIR = Path(__file__).parent
 DEFAULT_TRADES = (BASE_DIR / "output" /
                   "backtest_trades_timesl10d60_either_trend_marketadx_volume_rs_5y_20260829.csv")
@@ -79,10 +81,11 @@ def main():
 
     rows = []
     codes = sorted(df["code"].unique())
+    fetched = fetch_histories(codes, period="6y")
     for n, code in enumerate(codes, 1):
         try:
-            hist = yf.Ticker(code).history(period="6y")
-            if len(hist) < SWING_LOOKBACK + 10:
+            hist = fetched.get(code)
+            if hist is None or len(hist) < SWING_LOOKBACK + 10:
                 continue
             if hist.index.tz is not None:
                 hist.index = hist.index.tz_localize(None)

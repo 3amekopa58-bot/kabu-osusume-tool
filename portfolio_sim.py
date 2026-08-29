@@ -34,6 +34,7 @@ from backtest import (
     fetch_market_regime_adx,
     fetch_nikkei_close,
 )
+from price_cache import fetch_histories
 
 BASE_DIR = Path(__file__).parent
 TICKERS_CSV = BASE_DIR / "tickers.csv"
@@ -270,12 +271,13 @@ def main():
 
     sig_map, name_map = {}, {}
     excluded = []
-    print(f"{len(tickers)}銘柄の株価データを取得中…")
+    print(f"{len(tickers)}銘柄の株価データを用意中…")
+    fetched = fetch_histories([t["code"] for t in tickers], period=period)
     for i, t in enumerate(tickers, 1):
         code, name = t["code"], t["name"]
         try:
-            hist = yf.Ticker(code).history(period=period)
-            if len(hist) < 120:
+            hist = fetched.get(code)
+            if hist is None or len(hist) < 120:
                 continue
             # 汚染データの検出（1日で±80%超の値動き＝分割データ不整合の疑い）
             daily = hist["Close"].pct_change().abs()

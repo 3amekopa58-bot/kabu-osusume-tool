@@ -22,6 +22,8 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+from price_cache import fetch_histories, fetch_history
+
 BASE_DIR = Path(__file__).parent
 TICKERS_CSV = BASE_DIR / "tickers.csv"
 OUTPUT_DIR = BASE_DIR / "output"
@@ -35,8 +37,9 @@ MIN_WARMUP_DAYS = 10  # 5日線の傾き判定に必要な最低本数
 SUSPICIOUS_RETURN_THRESHOLD = 500.0
 
 
-def load_tickers():
-    with open(TICKERS_CSV, encoding="utf-8-sig") as f:
+def load_tickers(path=None):
+    """既定は日経225（tickers.csv）。universe.csv 等を渡せば対象を差し替えられる。"""
+    with open(path or TICKERS_CSV, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
 
@@ -47,7 +50,7 @@ def fetch_market_regime(period: str = "5y") -> pd.Series:
     出典: market regime filter は複数の情報源で「戦略の成否はシグナルより
     どんな相場環境で使うか次第」として有効性が示されている手法。
     """
-    idx = yf.Ticker("^N225").history(period=period)
+    idx = fetch_history("^N225", period=period)
     close = idx["Close"]
     sma100 = close.rolling(100).mean()
     return close > sma100
@@ -124,7 +127,7 @@ def calc_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
 
 def fetch_nikkei_close(period: str = "5y") -> pd.Series:
     """レラティブストレングス計算用に日経平均の終値だけを取得する"""
-    return yf.Ticker("^N225").history(period=period)["Close"]
+    return fetch_history("^N225", period=period)["Close"]
 
 
 def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
@@ -275,7 +278,7 @@ def fetch_market_regime_adx(period: str = "5y", adx_threshold: float = 20.0) -> 
     の日だけを「地合いが良い」と判定する。方向感の乏しい年（レンジ相場）を
     除外する狙い（PPP版では効果が薄かったため、別角度として試す）。
     """
-    idx = yf.Ticker("^N225").history(period=period)
+    idx = fetch_history("^N225", period=period)
     close = idx["Close"]
     sma100 = close.rolling(100).mean()
     is_uptrend = close > sma100
@@ -291,7 +294,7 @@ def fetch_market_regime_ppp(period: str = "5y", min_matches: int = 3) -> pd.Seri
     適用し、min_matches組以上揃っている＝方向感の強い上昇トレンドの日だけを
     「地合いが良い」と判定する。方向感の乏しい年（レンジ相場）を除外する狙い。
     """
-    idx = yf.Ticker("^N225").history(period=period)
+    idx = fetch_history("^N225", period=period)
     close = idx["Close"]
     ma_periods = (5, 10, 20, 50, 100)
     sma = {n: close.rolling(n).mean() for n in ma_periods}
@@ -645,8 +648,13 @@ def buy_and_hold_return(hist: pd.DataFrame) -> float:
     return (close.iloc[-1] - close.iloc[0]) / close.iloc[0] * 100
 
 
-def main():
-    arg1 = sys.argv[1] if len(sys.argv) > 1 else "5"
+def parse_config(args) -> dict:
+    """
+    コマンドライン引数（`sys.argv[1:]` 相当）を設定dictに変換する。
+    compare.py が複数条件を1プロセスで回すために、main()から切り出したもの。
+    """
+    arg1 = args[0] if args else "5"
+    rest = args[1:]
     exit_mode_map = {
         "ppp": "ppp_break", "atrtrail": "atr_trail", "pporatr": "ppp_or_atr",
         "timestop": "time_stop", "pportime": "ppp_or_time",
@@ -657,42 +665,41 @@ def main():
     }
     exit_mode = exit_mode_map.get(arg1, "ma")
     exit_period = 20 if exit_mode != "ma" else int(arg1)
-    trend_filter = "trend" in sys.argv[2:]
-    use_market_regime_ppp = "marketppp" in sys.argv[2:]
-    use_market_regime_adx = "marketadx" in sys.argv[2:]
-    use_market_regime = "market" in sys.argv[2:] or use_market_regime_ppp or use_market_regime_adx
-    use_volume_filter = "volume" in sys.argv[2:]
-    use_rs_filter = "rs" in sys.argv[2:]
-    use_earnings_filter = "earnings" in sys.argv[2:]
-    use_sector_filter = "sector" in sys.argv[2:]
-    use_rsi_filter = "rsi" in sys.argv[2:]
-    use_dev_filter = "dev" in sys.argv[2:]
-    use_candle_filter = "candle" in sys.argv[2:]
-    use_fib_filter = "fib" in sys.argv[2:]
+    trend_filter = "trend" in rest
+    use_market_regime_ppp = "marketppp" in rest
+    use_market_regime_adx = "marketadx" in rest
+    use_market_regime = "market" in rest or use_market_regime_ppp or use_market_regime_adx
+    use_volume_filter = "volume" in rest
+    use_rs_filter = "rs" in rest
+    use_earnings_filter = "earnings" in rest
+    use_sector_filter = "sector" in rest
+    use_rsi_filter = "rsi" in rest
+    use_dev_filter = "dev" in rest
+    use_candle_filter = "candle" in rest
+    use_fib_filter = "fib" in rest
     # 損切り幅は "sl10" / "sl15" のような引数で上書きできる（既定は10%）
-    sl_args = [a for a in sys.argv[2:] if a.startswith("sl") and a[2:].isdigit()]
+    sl_args = [a for a in rest if a.startswith("sl") and a[2:].isdigit()]
     stop_loss_pct = float(sl_args[0][2:]) if sl_args else 10.0
     # タイムストップの日数は "ts30" / "ts90" のような引数で上書きできる（既定は60日）
-    ts_args = [a for a in sys.argv[2:] if a.startswith("ts") and a[2:].isdigit()]
+    ts_args = [a for a in rest if a.startswith("ts") and a[2:].isdigit()]
     time_stop_days = int(ts_args[0][2:]) if ts_args else 60
     # エントリー方式は引数の組み合わせで決まる。指定できるシグナル名は
     # kahanshin / pullback / either（＝前2つ）/ ichimoku / macd / bandwalk。
     # 複数指定すると「どれか点灯で買い」になる（例: either macd）
     entry_parts = [
-        a for a in sys.argv[2:]
+        a for a in rest
         if a in ("kahanshin", "pullback", "either", "ichimoku", "macd", "bandwalk")
     ]
     entry_mode = "+".join(entry_parts) if entry_parts else "kahanshin"
     # 往復の取引コスト（手数料＋スリッページ）。"cost20" で0.20%を意味する
     # （既定は0＝コスト無視。過去の検証結果と数値を比較できるようにするため）
-    cost_args = [a for a in sys.argv[2:] if a.startswith("cost") and a[4:].isdigit()]
+    cost_args = [a for a in rest if a.startswith("cost") and a[4:].isdigit()]
     cost_pct = float(cost_args[0][4:]) / 100 if cost_args else 0.0
     # "short" を付けると空売り側（条件をすべて上下反転）を検証する
-    side = "short" if "short" in sys.argv[2:] else "long"
-    period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
+    side = "short" if "short" in rest else "long"
+    period_args = [a for a in rest if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
-    tickers = load_tickers()
     filter_desc = "PPP3/4以上+100日線上のみ" if trend_filter else "フィルターなし"
     if use_market_regime_ppp:
         filter_desc += "+日経平均自体がPPP3/4以上の強いトレンドの日のみ"
@@ -738,6 +745,112 @@ def main():
         "ichimoku": "一目三役好転", "macd": "MACD GC", "bandwalk": "バンドウォーク",
     }
     entry_desc = ("【空売り】" if side == "short" else "") + " or ".join(_names.get(p, p) for p in entry_mode.split("+"))
+
+    return {
+        "exit_mode": exit_mode, "exit_period": exit_period, "trend_filter": trend_filter,
+        "use_market_regime_ppp": use_market_regime_ppp, "use_market_regime_adx": use_market_regime_adx,
+        "use_market_regime": use_market_regime, "use_volume_filter": use_volume_filter,
+        "use_rs_filter": use_rs_filter, "use_earnings_filter": use_earnings_filter,
+        "use_sector_filter": use_sector_filter, "use_rsi_filter": use_rsi_filter,
+        "use_dev_filter": use_dev_filter, "use_candle_filter": use_candle_filter,
+        "use_fib_filter": use_fib_filter, "stop_loss_pct": stop_loss_pct,
+        "time_stop_days": time_stop_days, "entry_mode": entry_mode, "cost_pct": cost_pct,
+        "side": side, "history_period": history_period,
+        "filter_desc": filter_desc, "exit_desc": exit_desc, "entry_desc": entry_desc,
+    }
+
+
+def run_backtest(cfg: dict, hist_map: dict, name_map: dict, market_regime=None,
+                 nikkei_close=None, sector_map=None, sector_regime_map=None,
+                 verbose: bool = True):
+    """
+    取得済みの株価データに対して1条件ぶんのバックテストを回し、
+    (トレードのDataFrame, バイ&ホールドの平均リターン) を返す。
+    株価取得と切り離してあるので、compare.py は同じ hist_map を使い回して
+    複数条件を1プロセスで検証できる。
+    """
+    sector_map = sector_map or {}
+    sector_regime_map = sector_regime_map or {}
+    all_trades, bh_returns = [], []
+
+    for i, code in enumerate(hist_map, 1):
+        name = name_map[code]
+        hist = hist_map[code]
+        try:
+            earnings_dates = fetch_earnings_dates(code) if cfg["use_earnings_filter"] else None
+            sector_regime = (sector_regime_map.get(sector_map.get(code))
+                             if cfg["use_sector_filter"] else None)
+            trades = backtest_ticker(
+                code, name, hist, exit_period=cfg["exit_period"],
+                trend_filter=cfg["trend_filter"], exit_mode=cfg["exit_mode"],
+                market_regime=market_regime, volume_filter=cfg["use_volume_filter"],
+                nikkei_close=nikkei_close if cfg["use_rs_filter"] else None,
+                earnings_dates=earnings_dates, sector_regime=sector_regime,
+                rsi_filter=cfg["use_rsi_filter"], dev_filter=cfg["use_dev_filter"],
+                candle_filter=cfg["use_candle_filter"], fib_filter=cfg["use_fib_filter"],
+                stop_loss_pct=cfg["stop_loss_pct"], time_stop_days=cfg["time_stop_days"],
+                entry_mode=cfg["entry_mode"], cost_pct=cfg["cost_pct"], side=cfg["side"],
+            )
+            all_trades.extend(trades)
+            bh_returns.append(buy_and_hold_return(hist))
+            if verbose:
+                print(f"  [{i}/{len(hist_map)}] {name} ({code}) トレード数: {len(trades)}")
+        except Exception as e:
+            if verbose:
+                print(f"  [{i}/{len(hist_map)}] {name} ({code}) バックテスト失敗: {e}")
+
+    df = pd.DataFrame(all_trades)
+    avg_bh = sum(bh_returns) / len(bh_returns) if bh_returns else float("nan")
+    return df, avg_bh
+
+
+def load_price_data(tickers, history_period: str, use_sector_filter: bool = False):
+    """全銘柄の株価（＋必要ならセクター）をキャッシュ経由でまとめて用意する。"""
+    # 以前は1銘柄ずつ yf.Ticker().history() を呼んでおり、同じデータを
+    # 毎回ダウンロードするため225銘柄で5〜15分かかっていた
+    print(f"{len(tickers)}銘柄の株価データを用意中…")
+    fetched = fetch_histories([t["code"] for t in tickers], period=history_period)
+    hist_map, name_map, sector_map, short_data = {}, {}, {}, 0
+    for t in tickers:
+        code, name = t["code"], t["name"]
+        hist = fetched.get(code)
+        if hist is None or len(hist) < 120:
+            short_data += 1
+            continue
+        hist_map[code] = hist
+        name_map[code] = name
+        if use_sector_filter:
+            sector_map[code] = fetch_sector(code)
+    if short_data:
+        print(f"  データ不足で{short_data}銘柄をスキップしました")
+    return hist_map, name_map, sector_map
+
+
+def main():
+    cfg = parse_config(sys.argv[1:])
+    exit_mode = cfg["exit_mode"]
+    exit_period = cfg["exit_period"]
+    trend_filter = cfg["trend_filter"]
+    use_market_regime_ppp = cfg["use_market_regime_ppp"]
+    use_market_regime_adx = cfg["use_market_regime_adx"]
+    use_market_regime = cfg["use_market_regime"]
+    use_volume_filter = cfg["use_volume_filter"]
+    use_rs_filter = cfg["use_rs_filter"]
+    use_earnings_filter = cfg["use_earnings_filter"]
+    use_sector_filter = cfg["use_sector_filter"]
+    use_rsi_filter = cfg["use_rsi_filter"]
+    use_dev_filter = cfg["use_dev_filter"]
+    use_candle_filter = cfg["use_candle_filter"]
+    use_fib_filter = cfg["use_fib_filter"]
+    stop_loss_pct = cfg["stop_loss_pct"]
+    time_stop_days = cfg["time_stop_days"]
+    entry_mode = cfg["entry_mode"]
+    cost_pct = cfg["cost_pct"]
+    side = cfg["side"]
+    history_period = cfg["history_period"]
+    exit_desc, entry_desc, filter_desc = cfg["exit_desc"], cfg["entry_desc"], cfg["filter_desc"]
+
+    tickers = load_tickers()
     print(f"{len(tickers)}銘柄で{entry_desc}バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
@@ -758,23 +871,7 @@ def main():
 
     # セクターフィルターは全銘柄の株価をまず集めてセクター指数を合成する
     # 必要があるため、先に全銘柄のヒストリー（＋セクター）を取得しておく
-    hist_map = {}
-    name_map = {}
-    sector_map = {}
-    print(f"{len(tickers)}銘柄の株価データを取得中…")
-    for i, t in enumerate(tickers, 1):
-        code, name = t["code"], t["name"]
-        try:
-            hist = yf.Ticker(code).history(period=history_period)
-            if len(hist) < 120:
-                print(f"  [{i}/{len(tickers)}] {name} ({code}) データ不足のためスキップ")
-                continue
-            hist_map[code] = hist
-            name_map[code] = name
-            if use_sector_filter:
-                sector_map[code] = fetch_sector(code)
-        except Exception as e:
-            print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
+    hist_map, name_map, sector_map = load_price_data(tickers, history_period, use_sector_filter)
 
     sector_regime_map = {}
     if use_sector_filter:
@@ -782,35 +879,14 @@ def main():
         sector_close_map = build_sector_close(hist_map, sector_map)
         sector_regime_map = build_sector_regime(sector_close_map, nikkei_close)
 
-    all_trades = []
-    bh_returns = []
+    df, avg_bh = run_backtest(
+        cfg, hist_map, name_map, market_regime=market_regime, nikkei_close=nikkei_close,
+        sector_map=sector_map, sector_regime_map=sector_regime_map,
+    )
 
-    for i, code in enumerate(hist_map, 1):
-        name = name_map[code]
-        hist = hist_map[code]
-        try:
-            earnings_dates = fetch_earnings_dates(code) if use_earnings_filter else None
-            sector_regime = sector_regime_map.get(sector_map.get(code)) if use_sector_filter else None
-            trades = backtest_ticker(
-                code, name, hist, exit_period=exit_period, trend_filter=trend_filter,
-                exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
-                nikkei_close=nikkei_close if use_rs_filter else None, earnings_dates=earnings_dates,
-                sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
-                candle_filter=use_candle_filter, fib_filter=use_fib_filter,
-                stop_loss_pct=stop_loss_pct, time_stop_days=time_stop_days,
-                entry_mode=entry_mode, cost_pct=cost_pct, side=side,
-            )
-            all_trades.extend(trades)
-            bh_returns.append(buy_and_hold_return(hist))
-            print(f"  [{i}/{len(hist_map)}] {name} ({code}) トレード数: {len(trades)}")
-        except Exception as e:
-            print(f"  [{i}/{len(hist_map)}] {name} ({code}) バックテスト失敗: {e}")
-
-    if not all_trades:
+    if df.empty:
         print("トレードが1件も発生しませんでした。")
         return
-
-    df = pd.DataFrame(all_trades)
 
     suspicious = df[df["return_pct"].abs() > SUSPICIOUS_RETURN_THRESHOLD]
     if not suspicious.empty:
@@ -848,11 +924,10 @@ def main():
     avg_return = df["return_pct"].mean()
     median_return = df["return_pct"].median()
     avg_holding = df["holding_days"].mean()
-    avg_bh = sum(bh_returns) / len(bh_returns) if bh_returns else float("nan")
 
     print(f"\n完了: {out_path}")
     print(f"\n=== {entry_desc}シグナル バックテスト結果（エグジット={exit_desc}） ===")
-    print(f"総トレード数: {len(df)}件（対象{len(bh_returns)}銘柄）")
+    print(f"総トレード数: {len(df)}件（対象{len(hist_map)}銘柄）")
     print(f"勝率: {win_rate:.1f}%")
     print(f"平均リターン: {avg_return:+.2f}% / トレード")
     print(f"リターン中央値: {median_return:+.2f}% / トレード")
