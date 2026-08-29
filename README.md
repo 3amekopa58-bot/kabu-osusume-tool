@@ -88,11 +88,29 @@ ntfy.sh でプッシュ通知する（トピック名はGitHub Secretsの`NTFY_T
 |---|---|
 | `screen.py` | 本体。今日の推奨銘柄ランキングを出力 |
 | `backtest.py` | 売買ルールの検証（トレード単位の勝率・PF） |
+| `compare.py` | 複数の売買ルールを1プロセスでまとめて比較し表で出す |
+| `price_cache.py` | 株価のローカルキャッシュ（他スクリプトから使う） |
 | `portfolio_sim.py` | 予算・コスト・税金を入れた現実的な資産推移の検証 |
+| `scripts/build_universe.py` | 全上場銘柄から売買可能な銘柄ユニバースを作る |
 | `analyze_sectors.py` | 業種別の偏り・成績・時代による変化の分析 |
 | `analyze_targets.py` | 利確目標の方式（ATR・フィボナッチ等）の到達率検証 |
 | `scripts/notify.py` | ntfy.sh へのプッシュ通知（GitHub Actionsから呼ばれる） |
 | `find_kabu1000_candidates.py` | かぶ1000流の割安株スクリーニング（別系統） |
+
+### ルールを検証するとき
+
+条件を1つずつ `backtest.py` で回すのではなく、`compare.py` にまとめて渡す。
+株価を一度だけ用意して全条件を回すので速く、結果も表で並べて比較できる。
+
+```bash
+python3 compare.py "timesl trend marketadx volume rs either ; timesl trend marketadx volume rs pullback" --periods 5y,10y,max
+```
+
+- 条件の書式は `backtest.py` の引数と同じ。ファイル（1行1条件）でも渡せる
+- `--tickers universe.csv` で対象銘柄を差し替えられる
+- 採用基準は**5年・10年・26年で一貫して改善すること**（1期間だけの改善は不採用）
+- 株価は `data/price_cache/` にキャッシュされる（gitignore済み）。
+  おかしくなったら `python3 price_cache.py clear` で消す
 
 ## 参考にした書籍のルール集
 
