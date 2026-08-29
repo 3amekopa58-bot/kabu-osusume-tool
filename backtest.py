@@ -547,6 +547,9 @@ def main():
     # 損切り幅は "sl10" / "sl15" のような引数で上書きできる（既定は10%）
     sl_args = [a for a in sys.argv[2:] if a.startswith("sl") and a[2:].isdigit()]
     stop_loss_pct = float(sl_args[0][2:]) if sl_args else 10.0
+    # タイムストップの日数は "ts30" / "ts90" のような引数で上書きできる（既定は60日）
+    ts_args = [a for a in sys.argv[2:] if a.startswith("ts") and a[2:].isdigit()]
+    time_stop_days = int(ts_args[0][2:]) if ts_args else 60
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -586,8 +589,8 @@ def main():
         "ppp_or_time_or_dev": "PPP崩れ or タイムストップ60日 or 乖離20%の最も早いもの",
         "profit_target": "含み益が10%に達したら利確（固定利確目標・損切りなし）",
         "ppp_or_target": "PPP崩れ or 固定利確目標10%の早い方",
-        "time_or_sl": f"タイムストップ60日 or 損切り-{stop_loss_pct:.0f}%の早い方",
-        "time_dev_sl": f"タイムストップ60日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
+        "time_or_sl": f"タイムストップ{time_stop_days}日 or 損切り-{stop_loss_pct:.0f}%の早い方",
+        "time_dev_sl": f"タイムストップ{time_stop_days}日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
     }.get(exit_mode, f"{exit_period}日線割れ")
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
@@ -648,7 +651,7 @@ def main():
                 nikkei_close=nikkei_close if use_rs_filter else None, earnings_dates=earnings_dates,
                 sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
                 candle_filter=use_candle_filter, fib_filter=use_fib_filter,
-                stop_loss_pct=stop_loss_pct,
+                stop_loss_pct=stop_loss_pct, time_stop_days=time_stop_days,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -686,7 +689,8 @@ def main():
         "dev_exit": "devexit", "ppp_or_dev": "ppordev",
         "time_and_dev": "timeanddev", "ppp_or_time_or_dev": "pportimeordev",
         "profit_target": "target", "ppp_or_target": "pportarget",
-        "time_or_sl": f"timesl{stop_loss_pct:.0f}", "time_dev_sl": f"timedevsl{stop_loss_pct:.0f}",
+        "time_or_sl": f"timesl{stop_loss_pct:.0f}d{time_stop_days}",
+        "time_dev_sl": f"timedevsl{stop_loss_pct:.0f}d{time_stop_days}",
     }.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
