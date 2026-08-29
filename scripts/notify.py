@@ -48,6 +48,16 @@ TARGET_HIT_RATE_BANDS = [
 ]
 
 
+# 目標に到達するまでの営業日数（到達したトレードのみで集計）。
+# analyze_targets.py の実測値：全体で中央値10営業日・平均12.6営業日。
+# 目標の高さ別に見ても〜6%:11日 / 6-8%:10.5日 / 8-10%:12日 / 10%〜:7日 と
+# ほとんど差がなかったため（目標が遠いほど時間がかかるわけではない。
+# 急騰銘柄は一気に届くため10%超の帯がむしろ最短）、帯別には出し分けない。
+DAYS_TO_TARGET_MEDIAN = 10
+DAYS_TO_TARGET_Q1 = 4
+DAYS_TO_TARGET_Q3 = 18
+
+
 def hit_rate_for(target_pct: float) -> int:
     """目標の高さ（%）に対応する到達率を返す。"""
     for upper, rate in TARGET_HIT_RATE_BANDS:
@@ -131,8 +141,9 @@ def format_pick(r, names: dict) -> str:
         target_pct = (target_price - price) / price * 100
         target_gain = (target_price - price) * LOT_SIZE
         target_line = (
-            f"  利確目安 {target_price:,.0f}円(+{target_pct:.1f}%) = +{target_gain:,.0f}円"
-            f" ※到達{hit_rate_for(target_pct)}%"
+            f"  利確目安 {target_price:,.0f}円(+{target_pct:.1f}%) = +{target_gain:,.0f}円\n"
+            f"       到達率{hit_rate_for(target_pct)}% / 到達なら約{DAYS_TO_TARGET_MEDIAN}営業日"
+            f"（{DAYS_TO_TARGET_Q1}〜{DAYS_TO_TARGET_Q3}日）"
         )
 
     stop_price = price * (1 - STOP_LOSS_PCT / 100)

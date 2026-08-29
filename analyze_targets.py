@@ -103,6 +103,14 @@ def main():
                     rec[k] = v
                     rec[f"hit_{k}"] = (v is not None and hi >= v)
                     rec[f"pct_{k}"] = ((v - entry) / entry * 100) if v is not None else None
+                    # 目標に何営業日で到達したか（到達しなかった場合はNone）
+                    days = None
+                    if v is not None and end >= pos:
+                        window = hist["High"].iloc[pos:end + 1]
+                        reached = window[window >= v]
+                        if len(reached):
+                            days = int(idx.searchsorted(reached.index[0]) - pos)
+                    rec[f"days_{k}"] = days
                 rows.append(rec)
         except Exception:
             pass
@@ -157,6 +165,21 @@ def main():
     t2["到達率"] = (t2["到達率"] * 100).round(1)
     print(t2.to_string())
     print("※通知では銘柄ごとの目標の高さに応じてこの到達率を出し分ける")
+
+    print("\n" + "=" * 74)
+    print("目標に到達するまでの営業日数（到達したトレードのみ） ※通知に埋め込む値")
+    print("=" * 74)
+    d = res[["pct_ATR×3", "days_ATR×3"]].dropna()
+    d.columns = ["pct", "days"]
+    d["帯"] = pd.cut(d["pct"], [0, 6, 8, 10, 1000],
+                     labels=["〜6%", "6-8%", "8-10%", "10%〜"])
+    t3 = d.groupby("帯", observed=True).agg(
+        件数=("days", "size"), 中央値=("days", "median"),
+        平均=("days", "mean"), 上位25=("days", lambda s: s.quantile(0.25)),
+        上位75=("days", lambda s: s.quantile(0.75)))
+    print(t3.round(1).to_string())
+    print(f"\n全体: 中央値{d['days'].median():.0f}営業日 / 平均{d['days'].mean():.1f}営業日")
+    print("※到達しなかったトレードは含まない（含めると「到達しない」が混ざり意味が変わる）")
 
 
 if __name__ == "__main__":
