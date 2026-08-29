@@ -440,9 +440,14 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
         row["trend_filter_pass"] = bool(up_matches >= 3 and row["last_close"] > sma[100].iloc[-1]) \
             if not pd.isna(sma[100].iloc[-1]) else False
 
-        # 5日線自体の向き（直近3営業日での傾き）
+        # 5日線自体の向き（4営業日前と比較した傾き）。
+        # 2026-08-29修正：以前は iloc[-4]（＝3営業日前）と比較していたが、
+        # backtest.py / portfolio_sim.py は4営業日前と比較しており、
+        # 検証したルールと実際の判定がズレていた（下半身シグナルの約19%で
+        # 判定が分かれ、screen.py側が1割ほど取りこぼしていた）。
+        # バックテストで検証済みのルールに合わせる。
         sma5_series = sma[5]
-        sma5_prev = sma5_series.iloc[-4]
+        sma5_prev = sma5_series.iloc[-5]
         row["sma5_slope_up"] = sma5_series.iloc[-1] > sma5_prev
         row["sma5_slope_down"] = sma5_series.iloc[-1] < sma5_prev
 
