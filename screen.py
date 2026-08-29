@@ -37,6 +37,17 @@ LOT_SIZE = 100
 MA_PERIODS = (5, 10, 20, 50, 100)
 MIN_HISTORY_DAYS = 105  # 100日線 + スイングカウント用のバッファ
 
+# 早期利確ライン（グランビルの法則④・株価チャート大全 由来）。
+# 25日線からの上方かい離率がこの閾値以上で利確を検討する目安を表示する。
+# バックテストで確認済み：5年・10年・26年の全期間で勝率が一貫して改善
+# （52.5%→55.4%、43.7%→45.7%、42.8%→45.2%）した一方、PFは一貫して悪化
+# （3.13→2.55、2.25→1.87、2.05→1.80）。大きく伸びるトレードの利益を
+# 早期に刈り取る分、勝つ頻度は上がるが1件あたりの利益幅は縮小する
+# トレードオフ。2026-08-29、勝率を優先する方針で採用（screen.pyでは
+# 目安表示のみ、実際の売却判断は利用者が行う）
+DEV_MA_PERIOD = 25
+EXIT_DEV_THRESHOLD = 20.0
+
 
 def load_tickers():
     with open(TICKERS_CSV, encoding="utf-8-sig") as f:
@@ -385,6 +396,12 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
         for n in MA_PERIODS:
             row[f"sma{n}"] = sma[n].iloc[-1]
 
+        # 25日線からの上方かい離率（早期利確ラインの判定用）
+        sma25 = close.rolling(DEV_MA_PERIOD).mean().iloc[-1]
+        row["dev_from_sma25_pct"] = (
+            (row["last_close"] - sma25) / sma25 * 100 if pd.notna(sma25) and sma25 != 0 else None
+        )
+
         # 出来高フィルター：本日の出来高が直近20日平均の1.5倍以上か
         # バックテストで確認済み：出来高を伴った下半身はPF 1.80→2.60に大幅改善
         vol_avg20 = volume.rolling(20).mean().iloc[-1]
@@ -457,6 +474,7 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
         row["last_close"] = row["last_open"] = row["rsi14"] = None
         for n in MA_PERIODS:
             row[f"sma{n}"] = None
+        row["dev_from_sma25_pct"] = None
         row["ppp_matches"] = row["ppp_up"] = row["ppp_down"] = None
         row["trend_filter_pass"] = None
         row["sma5_slope_up"] = row["sma5_slope_down"] = None
@@ -568,6 +586,10 @@ def sell_timing(row) -> str:
     elif pd.notna(buy) and buy >= 6:
         next_checkpoint = 9 if buy < 9 else (17 if buy < 17 else 23)
         base += f" ／ 9の法則は現在{buy}本目（次の節目は{next_checkpoint}本目）"
+
+    dev = row.get("dev_from_sma25_pct")
+    if pd.notna(dev) and dev >= EXIT_DEV_THRESHOLD:
+        base += f" ／ 25日線から{dev:.0f}%上方乖離＝早期利確ライン到達（勝率は上がるがPFは下がるトレードオフあり、利確を検討）"
 
     return base
 
@@ -723,7 +745,7 @@ def main():
         "code", "name", "price", "lot_cost", "per", "pbr", "dividend_yield",
         "graham_number", "current_ratio", "debt_to_equity", "securities_valuation_diff_change_yen",
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
-        "volume_ratio", "volume_confirmed", "relative_strength_confirmed",
+        "volume_ratio", "volume_confirmed", "relative_strength_confirmed", "dev_from_sma25_pct",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",

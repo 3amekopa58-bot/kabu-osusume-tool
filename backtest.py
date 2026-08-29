@@ -159,6 +159,21 @@ def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
     return dx.ewm(alpha=1 / period, adjust=False).mean()
 
 
+def calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    RSI（Relative Strength Index）。Wilderの平滑化（EWMA, alpha=1/period）で
+    計算する、0〜100の過熱感指標。株価チャート大全（戸松信博監修）に
+    従い、標準期間14日・70%以上を「買われすぎ」の目安とする。
+    """
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+
 def fetch_market_regime_adx(period: str = "5y", adx_threshold: float = 20.0) -> pd.Series:
     """
     マーケットレジームフィルターのADX版。「終値が100日線より上」（方向）に
@@ -211,6 +226,12 @@ def backtest_ticker(
     earnings_avoid_days: int = 2,
     sector_regime: pd.Series = None,
     time_stop_days: int = 60,
+    rsi_filter: bool = False,
+    rsi_threshold: float = 70.0,
+    dev_filter: bool = False,
+    dev_threshold: float = 20.0,
+    dev_ma_period: int = 25,
+    exit_dev_threshold: float = 20.0,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -226,6 +247,12 @@ def backtest_ticker(
     新規エントリーを見送る（決算ギャップによる値飛びを避ける狙い）。
     sector_regime を渡した場合、その銘柄が属するセクター全体が日経平均を
     アウトパフォーム中の日だけ新規エントリーを許可する。
+    rsi_filter=True の場合、RSI（14日）が rsi_threshold 以上（買われすぎ）の
+    日は新規エントリーを見送る（株価チャート大全のRSI「70〜80%以上で
+    買われすぎ」を踏まえたフィルター）。
+    dev_filter=True の場合、株価が dev_ma_period 日線から dev_threshold %
+    以上上方乖離している日は新規エントリーを見送る（同書のかい離率・
+    グランビルの法則④を踏まえた「追いかけ買い」回避フィルター）。
 
     エグジット:
       exit_mode="ma"         終値が exit_period 日線を割り込んだら手仕舞い
@@ -234,6 +261,10 @@ def backtest_ticker(
       exit_mode="ppp_or_atr" 上記2つのどちらか早い方で手仕舞い
       exit_mode="time_stop"  保有日数が time_stop_days に達したら手仕舞い（純粋なタイムストップ）
       exit_mode="ppp_or_time" PPP崩れ or タイムストップの早い方で手仕舞い
+      exit_mode="dev_exit"   株価が dev_ma_period 日線から exit_dev_threshold %
+                              以上上方乖離したら手仕舞い（グランビルの法則④の
+                              逆張り利確を踏まえた早期利確エグジット）
+      exit_mode="ppp_or_dev" PPP崩れ or 上記乖離エグジットの早い方で手仕舞い
     """
     close = hist["Close"]
     open_ = hist["Open"]
@@ -245,6 +276,12 @@ def backtest_ticker(
     sma_exit = close.rolling(exit_period).mean()
     vol_avg20 = volume.rolling(20).mean()
     atr = calc_atr(high, low, close) if exit_mode in ("atr_trail", "ppp_or_atr") else None
+    rsi = calc_rsi(close) if rsi_filter else None
+    sma_dev = (
+        close.rolling(dev_ma_period).mean()
+        if dev_filter or exit_mode in ("dev_exit", "ppp_or_dev")
+        else None
+    )
 
     ma_periods = (5, 10, 20, 50, 100)
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
@@ -311,6 +348,19 @@ def backtest_ticker(
                 sector_ok = sector_regime_aligned.iloc[i]
                 signal = bool(sector_ok) if pd.notna(sector_ok) else False
 
+            if signal and rsi_filter:
+                if pd.isna(rsi.iloc[i]):
+                    signal = False
+                else:
+                    signal = rsi.iloc[i] < rsi_threshold
+
+            if signal and dev_filter:
+                if pd.isna(sma_dev.iloc[i]) or sma_dev.iloc[i] == 0:
+                    signal = False
+                else:
+                    dev_pct = (c - sma_dev.iloc[i]) / sma_dev.iloc[i] * 100
+                    signal = dev_pct < dev_threshold
+
             if signal:
                 in_position = True
                 entry_price = float(c)
@@ -324,6 +374,11 @@ def backtest_ticker(
                 if atr is not None else False
             )
             time_hit = (close.index[i] - entry_date).days >= time_stop_days
+            dev_hit = (
+                pd.notna(sma_dev.iloc[i]) and sma_dev.iloc[i] != 0
+                and (c - sma_dev.iloc[i]) / sma_dev.iloc[i] * 100 >= exit_dev_threshold
+                if sma_dev is not None else False
+            )
             if exit_mode == "ppp_break":
                 should_exit = ppp_break_hit
             elif exit_mode == "atr_trail":
@@ -334,6 +389,10 @@ def backtest_ticker(
                 should_exit = time_hit
             elif exit_mode == "ppp_or_time":
                 should_exit = ppp_break_hit or time_hit
+            elif exit_mode == "dev_exit":
+                should_exit = dev_hit
+            elif exit_mode == "ppp_or_dev":
+                should_exit = ppp_break_hit or dev_hit
             else:
                 should_exit = c < sma_exit.iloc[i]
             if should_exit:
@@ -365,6 +424,7 @@ def main():
     exit_mode_map = {
         "ppp": "ppp_break", "atrtrail": "atr_trail", "pporatr": "ppp_or_atr",
         "timestop": "time_stop", "pportime": "ppp_or_time",
+        "devexit": "dev_exit", "ppordev": "ppp_or_dev",
     }
     exit_mode = exit_mode_map.get(arg1, "ma")
     exit_period = 20 if exit_mode != "ma" else int(arg1)
@@ -376,6 +436,8 @@ def main():
     use_rs_filter = "rs" in sys.argv[2:]
     use_earnings_filter = "earnings" in sys.argv[2:]
     use_sector_filter = "sector" in sys.argv[2:]
+    use_rsi_filter = "rsi" in sys.argv[2:]
+    use_dev_filter = "dev" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -395,12 +457,18 @@ def main():
         filter_desc += "+決算発表日の前後2営業日は見送り"
     if use_sector_filter:
         filter_desc += "+所属セクター全体が日経平均をアウトパフォーム中のみ"
+    if use_rsi_filter:
+        filter_desc += "+RSI(14日)が70未満（買われすぎ回避）"
+    if use_dev_filter:
+        filter_desc += "+株価が25日線から20%未満の上方乖離（追いかけ買い回避）"
     exit_desc = {
         "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
         "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
         "ppp_or_atr": "PPP崩れ or トレーリングストップの早い方",
         "time_stop": "保有60日で強制手仕舞い（タイムストップ）",
         "ppp_or_time": "PPP崩れ or タイムストップの早い方",
+        "dev_exit": "株価が25日線から20%以上上方乖離（グランビル法則④の早期利確）",
+        "ppp_or_dev": "PPP崩れ or 乖離エグジットの早い方",
     }.get(exit_mode, f"{exit_period}日線割れ")
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
@@ -459,7 +527,7 @@ def main():
                 code, name, hist, exit_period=exit_period, trend_filter=trend_filter,
                 exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
                 nikkei_close=nikkei_close if use_rs_filter else None, earnings_dates=earnings_dates,
-                sector_regime=sector_regime,
+                sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -490,10 +558,11 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "")
+    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
+        "dev_exit": "devexit", "ppp_or_dev": "ppordev",
     }.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
