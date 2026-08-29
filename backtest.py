@@ -174,6 +174,54 @@ def calc_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def calc_takuri_daki_confirmed(
+    open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series, lookback: int = 10
+) -> pd.Series:
+    """
+    株価チャート大全（戸松信博監修）の「たくり線」（下ヒゲの長い小陽線/
+    小陰線＝底値圏での押し目買い意識を示す）に続けて「抱き線」（直後の
+    包み足＝反転をより明確に確定させる）が出現したかを検出する。
+    直近lookback日以内にこの組み合わせが1回でも発生していればTrueとする
+    （下半身エントリーの信頼度を補強する候補シグナルとして検証）。
+    """
+    body = (close - open_).abs()
+    total_range = (high - low).replace(0, pd.NA)
+    lower_shadow = pd.concat([open_, close], axis=1).min(axis=1) - low
+    upper_shadow = high - pd.concat([open_, close], axis=1).max(axis=1)
+
+    is_takuri = (
+        (lower_shadow >= total_range * 0.6)
+        & (body <= total_range * 0.3)
+        & (upper_shadow <= total_range * 0.15)
+    ).fillna(False)
+
+    body_lo = pd.concat([open_, close], axis=1).min(axis=1)
+    body_hi = pd.concat([open_, close], axis=1).max(axis=1)
+    prev_body_lo = body_lo.shift(1)
+    prev_body_hi = body_hi.shift(1)
+    is_daki = (
+        (body_lo <= prev_body_lo) & (body_hi >= prev_body_hi) & (body > body.shift(1))
+    ).fillna(False)
+
+    # 「たくり線の翌日に抱き線」が起きた日を1つの複合シグナル日として立てる
+    combo_day = (is_takuri.shift(1).fillna(False)) & is_daki
+    return combo_day.rolling(lookback, min_periods=1).max().astype(bool)
+
+
+def calc_fib_retracement_pct(
+    close: pd.Series, swing_lookback: int = 60, pullback_lookback: int = 15
+) -> pd.Series:
+    """
+    株価チャート大全のフィボナッチ・リトレースメント（38.2%/50%/61.8%）を
+    踏まえ、直近swing_lookback日の高値（スイングハイの近似）からの、
+    直近pullback_lookback日の安値までの押しの深さを%で返す簡易近似。
+    退行率 = (スイングハイ - 直近安値) / スイングハイ × 100
+    """
+    swing_high = close.rolling(swing_lookback).max()
+    pullback_low = close.rolling(pullback_lookback).min()
+    return (swing_high - pullback_low) / swing_high * 100
+
+
 def fetch_market_regime_adx(period: str = "5y", adx_threshold: float = 20.0) -> pd.Series:
     """
     マーケットレジームフィルターのADX版。「終値が100日線より上」（方向）に
@@ -232,6 +280,11 @@ def backtest_ticker(
     dev_threshold: float = 20.0,
     dev_ma_period: int = 25,
     exit_dev_threshold: float = 20.0,
+    candle_filter: bool = False,
+    candle_lookback: int = 10,
+    fib_filter: bool = False,
+    fib_low: float = 25.0,
+    fib_high: float = 65.0,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -253,6 +306,11 @@ def backtest_ticker(
     dev_filter=True の場合、株価が dev_ma_period 日線から dev_threshold %
     以上上方乖離している日は新規エントリーを見送る（同書のかい離率・
     グランビルの法則④を踏まえた「追いかけ買い」回避フィルター）。
+    candle_filter=True の場合、直近candle_lookback日以内に「たくり線→
+    抱き線」の複合シグナル（同書由来）が出現していない下半身は見送る。
+    fib_filter=True の場合、フィボナッチ・リトレースメント（同書由来）を
+    踏まえ、直近の押しの深さが fib_low〜fib_high %の範囲に収まっていない
+    （浅すぎる・深すぎる押し目の）下半身は見送る。
 
     エグジット:
       exit_mode="ma"         終値が exit_period 日線を割り込んだら手仕舞い
@@ -282,6 +340,11 @@ def backtest_ticker(
         if dev_filter or exit_mode in ("dev_exit", "ppp_or_dev")
         else None
     )
+    candle_confirmed = (
+        calc_takuri_daki_confirmed(open_, high, low, close, candle_lookback)
+        if candle_filter else None
+    )
+    fib_retracement = calc_fib_retracement_pct(close) if fib_filter else None
 
     ma_periods = (5, 10, 20, 50, 100)
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
@@ -361,6 +424,13 @@ def backtest_ticker(
                     dev_pct = (c - sma_dev.iloc[i]) / sma_dev.iloc[i] * 100
                     signal = dev_pct < dev_threshold
 
+            if signal and candle_filter:
+                signal = bool(candle_confirmed.iloc[i])
+
+            if signal and fib_filter:
+                fib_pct = fib_retracement.iloc[i]
+                signal = pd.notna(fib_pct) and fib_low <= fib_pct <= fib_high
+
             if signal:
                 in_position = True
                 entry_price = float(c)
@@ -438,6 +508,8 @@ def main():
     use_sector_filter = "sector" in sys.argv[2:]
     use_rsi_filter = "rsi" in sys.argv[2:]
     use_dev_filter = "dev" in sys.argv[2:]
+    use_candle_filter = "candle" in sys.argv[2:]
+    use_fib_filter = "fib" in sys.argv[2:]
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -461,6 +533,10 @@ def main():
         filter_desc += "+RSI(14日)が70未満（買われすぎ回避）"
     if use_dev_filter:
         filter_desc += "+株価が25日線から20%未満の上方乖離（追いかけ買い回避）"
+    if use_candle_filter:
+        filter_desc += "+直近10日以内にたくり線→抱き線の複合シグナルあり"
+    if use_fib_filter:
+        filter_desc += "+押しの深さがフィボナッチ25〜65%の範囲内"
     exit_desc = {
         "ppp_break": "5日線が20日線を下抜け（PPP崩れ）",
         "atr_trail": "保有中の最高値から2.5×ATR下落（トレーリングストップ）",
@@ -528,6 +604,7 @@ def main():
                 exit_mode=exit_mode, market_regime=market_regime, volume_filter=use_volume_filter,
                 nikkei_close=nikkei_close if use_rs_filter else None, earnings_dates=earnings_dates,
                 sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
+                candle_filter=use_candle_filter, fib_filter=use_fib_filter,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -558,7 +635,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "")
+    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
