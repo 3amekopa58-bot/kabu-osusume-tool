@@ -1,0 +1,264 @@
+"""
+ポートフォリオシミュレーション：予算制約を入れた現実的な成績検証
+
+backtest.py は「シグナルが出た全銘柄を売買できた」前提でトレード単位に
+集計しているが、実際には予算（既定100万円・100株単位）の範囲でしか
+買えず、シグナルが同時に多数出た日はどれかを選ぶ必要がある。
+このスクリプトは資金を実際に回しながら日次でシミュレーションし、
+「実際にいくらになるのか」を測る。
+
+エントリー: 下半身 or 押し目買い（screen.py / backtest.py の採用ルール）
+            ＋ PPP3/4以上・100日線上・日経ADXレジーム・出来高・相対力
+エグジット: 保有60日 or 買値-10%の損切り（早い方）
+
+使い方:
+    python portfolio_sim.py [期間] [選択ルール]
+      期間     : 5y / 10y / max（既定 5y）
+      選択ルール: volume（出来高が強い順・既定）/ first（銘柄コード順）
+                 / random（ランダム。seed違いで複数回試行して平均を出す）
+出力:
+    標準出力に資産推移サマリー
+"""
+
+import csv
+import datetime as dt
+import random
+import sys
+from pathlib import Path
+
+import pandas as pd
+import yfinance as yf
+
+from backtest import (
+    SUSPICIOUS_RETURN_THRESHOLD,
+    fetch_market_regime_adx,
+    fetch_nikkei_close,
+)
+
+BASE_DIR = Path(__file__).parent
+TICKERS_CSV = BASE_DIR / "tickers.csv"
+
+INITIAL_CAPITAL = 1_000_000
+LOT_SIZE = 100
+HOLDING_DAYS_LIMIT = 60
+STOP_LOSS_PCT = 10.0
+PULLBACK_TOLERANCE_PCT = 2.0
+COST_PCT = 0.2  # 往復の取引コスト（手数料＋スリッページ）
+RANDOM_TRIALS = 5
+
+# 1日の終値がこの倍率を超えて動いた銘柄は、yfinanceの株式分割データ不整合に
+# よる汚染データとみなして対象から除外する（東京海上HD/8766の2006-09-29に
+# 誤った分割比率500が記録されており、それ以前の株価が1/500になっている等）。
+# 日経225の大型株が1日で+80%動くことは実質ないため、誤検知の心配は小さい。
+# 資産推移そのものが壊れるため、集計時の除外ではなく読み込み時に落とす。
+MAX_PLAUSIBLE_DAILY_MOVE = 0.8
+
+
+def load_tickers():
+    with open(TICKERS_CSV, encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def build_signals(hist: pd.DataFrame, nikkei_close: pd.Series) -> pd.DataFrame:
+    """
+    1銘柄について、日次のエントリーシグナルと補助情報をまとめたDataFrameを返す。
+    backtest.py の entry_mode="either" ＋ trend/volume/rs フィルターと同じ条件。
+    """
+    close, open_, low, volume = hist["Close"], hist["Open"], hist["Low"], hist["Volume"]
+    ma = {n: close.rolling(n).mean() for n in (5, 10, 20, 50, 100)}
+
+    is_bullish = close > open_
+    # 下半身：5日線が上向き＋陽線で5日線を上抜け
+    kahanshin = (
+        (close.shift(1) <= ma[5].shift(1)) & (close > ma[5])
+        & is_bullish & (ma[5] > ma[5].shift(4))
+    )
+    # 押し目買い：20日線まで押して陽線で反発
+    pullback = (
+        (low <= ma[20] * (1 + PULLBACK_TOLERANCE_PCT / 100))
+        & is_bullish & (close > ma[20])
+    )
+
+    ppp_matches = sum(
+        (ma[a] > ma[b]).astype(int)
+        for a, b in ((5, 10), (10, 20), (20, 50), (50, 100))
+    )
+    trend_ok = (ppp_matches >= 3) & (close > ma[100])
+
+    vol_avg20 = volume.rolling(20).mean()
+    volume_ratio = volume / vol_avg20
+    volume_ok = volume_ratio >= 1.5
+
+    nikkei_aligned = nikkei_close.reindex(close.index, method="ffill")
+    rs_ratio = close / nikkei_aligned
+    rs_ok = rs_ratio > rs_ratio.rolling(50).mean()
+
+    return pd.DataFrame({
+        "close": close,
+        "signal": (kahanshin | pullback) & trend_ok & volume_ok & rs_ok,
+        "volume_ratio": volume_ratio,
+    })
+
+
+def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
+             calendar: pd.DatetimeIndex, rule: str, seed: int = 0) -> dict:
+    """資金を実際に回しながら日次でシミュレーションする。"""
+    rng = random.Random(seed)
+    capital = float(INITIAL_CAPITAL)
+    positions = {}   # code -> dict(entry_price, entry_date, shares)
+    trades = []
+    equity_curve = []
+
+    for day in calendar:
+        # --- 1) 手仕舞い判定（保有60日 or 買値-10%） ---
+        for code in list(positions.keys()):
+            pos = positions[code]
+            df = sig_map[code]
+            if day not in df.index:
+                continue
+            price = float(df.at[day, "close"])
+            held_days = (day - pos["entry_date"]).days
+            loss_pct = (price - pos["entry_price"]) / pos["entry_price"] * 100
+            if held_days >= HOLDING_DAYS_LIMIT or loss_pct <= -STOP_LOSS_PCT:
+                capital += price * pos["shares"]
+                trades.append({
+                    "code": code, "name": name_map[code],
+                    "entry_date": pos["entry_date"].date(), "exit_date": day.date(),
+                    "return_pct": loss_pct - COST_PCT,
+                    "holding_days": held_days,
+                })
+                del positions[code]
+
+        # --- 2) 新規エントリー（地合いが良い日のみ、予算の範囲で） ---
+        regime_ok = bool(regime.get(day, False))
+        if regime_ok:
+            candidates = []
+            for code, df in sig_map.items():
+                if code in positions or day not in df.index:
+                    continue
+                row = df.loc[day]
+                if bool(row["signal"]):
+                    candidates.append((code, float(row["close"]),
+                                       float(row["volume_ratio"] or 0)))
+            if rule == "volume":
+                candidates.sort(key=lambda x: -x[2])
+            elif rule == "random":
+                rng.shuffle(candidates)
+            else:  # first = 銘柄コード順
+                candidates.sort(key=lambda x: x[0])
+
+            for code, price, _ in candidates:
+                cost = price * LOT_SIZE
+                if cost <= capital:
+                    capital -= cost
+                    positions[code] = {
+                        "entry_price": price, "entry_date": day, "shares": LOT_SIZE,
+                    }
+
+        # --- 3) 時価評価 ---
+        holdings_value = 0.0
+        for code, pos in positions.items():
+            df = sig_map[code]
+            if day in df.index:
+                holdings_value += float(df.at[day, "close"]) * pos["shares"]
+            else:
+                holdings_value += pos["entry_price"] * pos["shares"]
+        equity_curve.append(capital + holdings_value)
+
+    eq = pd.Series(equity_curve, index=calendar)
+    peak = eq.cummax()
+    max_dd = ((eq - peak) / peak).min() * 100
+    tdf = pd.DataFrame(trades)
+    return {
+        "final": eq.iloc[-1],
+        "total_return_pct": (eq.iloc[-1] - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100,
+        "max_drawdown_pct": max_dd,
+        "n_trades": len(tdf),
+        "win_rate": (tdf["return_pct"] > 0).mean() * 100 if len(tdf) else float("nan"),
+        "avg_return_pct": tdf["return_pct"].mean() if len(tdf) else float("nan"),
+        "max_trade_return": tdf["return_pct"].max() if len(tdf) else float("nan"),
+        "equity": eq,
+    }
+
+
+def main():
+    period = sys.argv[1] if len(sys.argv) > 1 else "5y"
+    rule = sys.argv[2] if len(sys.argv) > 2 else "volume"
+
+    tickers = load_tickers()
+    print(f"{len(tickers)}銘柄・過去{period}・選択ルール={rule} でポートフォリオ"
+          f"シミュレーションを実行します（初期資金{INITIAL_CAPITAL:,}円・"
+          f"{LOT_SIZE}株単位・往復コスト{COST_PCT}%）…")
+
+    print("日経平均のデータを取得中…")
+    regime_raw = fetch_market_regime_adx(period)
+    nikkei_close = fetch_nikkei_close(period)
+
+    sig_map, name_map = {}, {}
+    excluded = []
+    print(f"{len(tickers)}銘柄の株価データを取得中…")
+    for i, t in enumerate(tickers, 1):
+        code, name = t["code"], t["name"]
+        try:
+            hist = yf.Ticker(code).history(period=period)
+            if len(hist) < 120:
+                continue
+            # 汚染データの検出（1日で±80%超の値動き＝分割データ不整合の疑い）
+            daily = hist["Close"].pct_change().abs()
+            if (daily > MAX_PLAUSIBLE_DAILY_MOVE).any():
+                worst = daily.idxmax()
+                excluded.append(f"{name}({code}) {worst.date()} に{daily.max()*100:.0f}%変動")
+                continue
+            sig_map[code] = build_signals(hist, nikkei_close)
+            name_map[code] = name
+        except Exception as e:
+            print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
+
+    if excluded:
+        print(f"\n⚠️  株価データに不自然な急変（1日±{MAX_PLAUSIBLE_DAILY_MOVE*100:.0f}%超）が"
+              f"あり、分割データ不整合の疑いがあるため{len(excluded)}銘柄を除外しました：")
+        for e in excluded:
+            print(f"   {e}")
+    print(f"  → {len(sig_map)}銘柄を対象にシミュレーションします")
+
+    # 全銘柄の営業日を統合したカレンダー
+    calendar = sorted(set().union(*[df.index for df in sig_map.values()]))
+    calendar = pd.DatetimeIndex(calendar)
+    regime = regime_raw.reindex(calendar, method="ffill").fillna(False)
+
+    if rule == "random":
+        results = [simulate(sig_map, name_map, regime, calendar, rule, seed=s)
+                   for s in range(RANDOM_TRIALS)]
+        print(f"\n=== 結果（ランダム選択・{RANDOM_TRIALS}回試行の平均）===")
+        for key, label in [("total_return_pct", "トータルリターン"),
+                           ("max_drawdown_pct", "最大ドローダウン"),
+                           ("win_rate", "勝率"), ("n_trades", "トレード数")]:
+            vals = [r[key] for r in results]
+            print(f"{label}: 平均 {sum(vals)/len(vals):+.1f}"
+                  f"（最小 {min(vals):+.1f} / 最大 {max(vals):+.1f}）")
+        return
+
+    r = simulate(sig_map, name_map, regime, calendar, rule)
+
+    # 日経平均との比較は「シミュレーションと同一期間」に揃える。
+    # period="max" の ^N225 は1965年まで遡るため、そのまま比較すると
+    # 61年分の指数リターンと26年分の戦略リターンを比べることになり無意味
+    nk = nikkei_close.loc[(nikkei_close.index >= calendar[0])
+                          & (nikkei_close.index <= calendar[-1])]
+    nikkei_ret = (nk.iloc[-1] - nk.iloc[0]) / nk.iloc[0] * 100
+
+    print(f"\n=== ポートフォリオシミュレーション結果（{rule}）===")
+    print(f"対象期間: {calendar[0].date()} 〜 {calendar[-1].date()}")
+    print(f"初期資金: {INITIAL_CAPITAL:,}円 → 最終資産: {r['final']:,.0f}円")
+    print(f"トータルリターン: {r['total_return_pct']:+.1f}%")
+    print(f"最大ドローダウン: {r['max_drawdown_pct']:.1f}%")
+    print(f"トレード数: {r['n_trades']}件 / 勝率: {r['win_rate']:.1f}% "
+          f"/ 平均リターン: {r['avg_return_pct']:+.2f}%")
+    print(f"（参考）同期間の日経平均を持ち切った場合: {nikkei_ret:+.1f}%")
+    if pd.notna(r["max_trade_return"]) and r["max_trade_return"] > SUSPICIOUS_RETURN_THRESHOLD:
+        print(f"\n⚠️  1トレードで{r['max_trade_return']:.0f}%という異常なリターンが"
+              "含まれています。データ不整合の可能性があるため結果を鵜呑みにしないでください。")
+
+
+if __name__ == "__main__":
+    main()
