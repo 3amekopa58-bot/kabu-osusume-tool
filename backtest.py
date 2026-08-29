@@ -848,7 +848,17 @@ def load_price_data(tickers, history_period: str, use_sector_filter: bool = Fals
 
 
 def main():
-    cfg = parse_config(sys.argv[1:])
+    # "--tickers <パス>" は条件の指定と混ざらないよう、先に取り除いて解釈する
+    args, tickers_path, skip = [], None, False
+    for a in sys.argv[1:]:
+        if skip:
+            tickers_path, skip = a, False
+            continue
+        if a == "--tickers":
+            skip = True
+            continue
+        args.append(a)
+    cfg = parse_config(args)
     exit_mode = cfg["exit_mode"]
     exit_period = cfg["exit_period"]
     trend_filter = cfg["trend_filter"]
@@ -871,7 +881,7 @@ def main():
     history_period = cfg["history_period"]
     exit_desc, entry_desc, filter_desc = cfg["exit_desc"], cfg["entry_desc"], cfg["filter_desc"]
 
-    tickers = load_tickers()
+    tickers = load_tickers(tickers_path)
     print(f"{len(tickers)}銘柄で{entry_desc}バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
@@ -938,7 +948,8 @@ def main():
         "time_or_sl": f"timesl{stop_loss_pct:.0f}d{time_stop_days}",
         "time_dev_sl": f"timedevsl{stop_loss_pct:.0f}d{time_stop_days}",
     }.get(exit_mode, f"exit{exit_period}")
-    out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
+    universe_tag = f"_{Path(tickers_path).stem}" if tickers_path else ""
+    out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}{universe_tag}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     win_rate = (df["return_pct"] > 0).mean() * 100

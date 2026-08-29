@@ -17,14 +17,33 @@ tickers.csv に書かれた銘柄について、
 import csv
 import datetime as dt
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 import yfinance as yf
 
+from price_cache import fetch_histories, fetch_history
+
 BASE_DIR = Path(__file__).parent
-TICKERS_CSV = BASE_DIR / "tickers.csv"
+# 対象銘柄は日経225ではなく、全上場から「予算内で買えて流動性がある」で
+# 絞った944銘柄（scripts/build_universe.py が生成）。予算100万円では大型株
+# ほど買えず資金が遊ぶのが最大の敗因だったため（REQUIREMENTS 4.4-8）
+TICKERS_CSV = BASE_DIR / "universe.csv"
+# info（財務データ）の取得は1銘柄ずつHTTPリクエストが飛ぶため、944銘柄では
+# 直列だと数十分かかる。IO待ちなのでスレッドで並列化する
+INFO_WORKERS = 8
+# 財務データを取りに行く銘柄数の上限。テクニカルスコア上位のみに絞る
+# （944銘柄すべてに info を投げるとレート制限で全滅するため）
+FUNDAMENTAL_POOL_SIZE = 120
+# レート制限に当たったときの待ち時間（秒）。試行ごとに倍にして待つ
+RATE_LIMIT_WAIT_SEC = 5
+# 財務データの取得がこの割合を超えて失敗したら、割安度スコアが機能しないので
+# 警告する（欠損は一律0.5点として扱われるため、黙っていると
+# 「テクニカルだけで選んだ結果」が通常の推奨に見えてしまう）
+FUNDAMENTAL_FAILURE_WARN_RATIO = 0.3
 OUTPUT_DIR = BASE_DIR / "output"
 EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
 
@@ -121,7 +140,9 @@ def calc_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
 
 def fetch_nikkei_close(period: str = "3y") -> pd.Series:
     """レラティブストレングス計算用に日経平均の終値だけを取得する"""
-    return yf.Ticker("^N225").history(period=period)["Close"]
+    # 個別株と同じ経路（tzなしindex）で取らないと、レラティブストレングスの
+    # 計算で tz付き/なし の比較になり全銘柄が失敗する
+    return fetch_history("^N225", period=period, stale_days=0)["Close"]
 
 
 def fetch_market_regime(adx_threshold: float = 20.0) -> bool:
@@ -132,7 +153,7 @@ def fetch_market_regime(adx_threshold: float = 20.0) -> bool:
     上」だけの判定より、ADXでトレンド強度も見る方が勝率・平均リターン・
     プロフィットファクターが一貫して改善した（26年PF 1.67→2.02）。
     """
-    idx = yf.Ticker("^N225").history(period="1y")
+    idx = fetch_history("^N225", period="1y", stale_days=0)
     close = idx["Close"]
     sma100 = close.rolling(100).mean()
     if pd.isna(sma100.iloc[-1]):
@@ -379,16 +400,26 @@ def detect_fushime(close: pd.Series, lookback: int = 60, recent_days: int = 5) -
     return {"breakout_level": breakout_level, "near_level": near_level, "label": label}
 
 
-def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_close: Optional[pd.Series] = None) -> dict:
-    ticker = yf.Ticker(code)
-    info = ticker.info
-    hist = ticker.history(period="3y")
-
+def fetch_fundamentals(code: str, edinet_cache: Optional[dict] = None,
+                       retries: int = 2) -> dict:
+    """
+    財務データ（yfinanceのinfo）を取る。1銘柄につきHTTPリクエストが1本飛ぶため、
+    944銘柄すべてに対して呼ぶとYahooのレート制限（Too Many Requests）に当たる。
+    テクニカル評価で上位に入った銘柄にだけ呼ぶこと（main参照）。
+    レート制限は時間を置けば解けるので、少し待って数回だけ試し直す。
+    """
+    for attempt in range(retries + 1):
+        try:
+            info = yf.Ticker(code).info
+            break
+        except Exception:
+            if attempt == retries:
+                raise
+            time.sleep(RATE_LIMIT_WAIT_SEC * (attempt + 1))
+    else:  # pragma: no cover
+        info = {}
     edinet_info = (edinet_cache or {}).get(code, {})
-
-    row = {
-        "code": code,
-        "name": name,
+    return {
         "price": info.get("currentPrice"),
         "per": info.get("trailingPE"),
         "pbr": info.get("priceToBook"),
@@ -401,6 +432,30 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None, nikkei_
         # （収録企業は225銘柄中171銘柄・スコアには未使用、参考表示のみ）
         "securities_valuation_diff_change_yen": edinet_info.get("valuation_diff_change_yen"),
     }
+
+
+def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None,
+              nikkei_close: Optional[pd.Series] = None,
+              hist: Optional[pd.DataFrame] = None,
+              with_fundamentals: bool = True) -> dict:
+    """
+    1銘柄ぶんの評価行を作る。with_fundamentals=False なら株価データだけで
+    計算できるテクニカル指標のみを埋める（ネットワーク不要）。
+    """
+    if hist is None:
+        # 一括取得から漏れた銘柄のフォールバック。index の tz を落として
+        # キャッシュ経由のデータと揃える（混在すると日経平均との比較で落ちる）
+        hist = yf.Ticker(code).history(period="3y")
+        if hist.index.tz is not None:
+            hist.index = hist.index.tz_localize(None)
+
+    row = {"code": code, "name": name}
+    if with_fundamentals:
+        row.update(fetch_fundamentals(code, edinet_cache))
+    else:
+        row.update({k: None for k in (
+            "price", "per", "pbr", "dividend_yield", "current_ratio",
+            "debt_to_equity", "securities_valuation_diff_change_yen")})
 
     if len(hist) >= MIN_HISTORY_DAYS:
         close = hist["Close"]
@@ -765,14 +820,75 @@ def main():
         nikkei_close = None
     print(f"{len(tickers)}銘柄のデータを取得します…")
 
-    rows = []
-    for i, t in enumerate(tickers, 1):
+    # 株価は一括で取る。当日の推奨を出すので stale_days=0 を指定して
+    # 必ず最新の足まで取り直す（古いキャッシュで推奨を出すと静かに狂う）
+    hist_map = fetch_histories([t["code"] for t in tickers], period="3y", stale_days=0)
+
+    # 第1段階：株価だけで計算できるテクニカル指標を全銘柄ぶん作る（通信なし）
+    rows, failures = [], []
+    for t in tickers:
         code, name = t["code"], t["name"]
         try:
-            rows.append(fetch_one(code, name, edinet_cache, nikkei_close))
-            print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得OK")
+            rows.append(fetch_one(code, name, edinet_cache, nikkei_close,
+                                  hist=hist_map.get(code), with_fundamentals=False))
         except Exception as e:
-            print(f"  [{i}/{len(tickers)}] {name} ({code}) 取得失敗: {e}")
+            failures.append(f"{name} ({code}) 評価失敗: {e}")
+    print(f"  テクニカル評価: {len(rows)}件（失敗{len(failures)}件）")
+
+    # 第2段階：財務データはテクニカル上位の銘柄にだけ取りに行く。
+    # info は1銘柄1リクエストで、944銘柄ぶん投げるとYahooに
+    # 「Too Many Requests」で弾かれ全滅する（2026-08-29に実際に発生）。
+    # 圏外の銘柄は総合スコアで上位に来る余地がないため、実質の損失はない。
+    def _tech(r):
+        # 株価データが短い銘柄は指標が揃わない。順位付けの前段なので0点扱いにする
+        try:
+            return technical_score(r, market_regime_up)
+        except (KeyError, TypeError):
+            return 0.0
+
+    rows.sort(key=_tech, reverse=True)
+    targets, rest = rows[:FUNDAMENTAL_POOL_SIZE], rows[FUNDAMENTAL_POOL_SIZE:]
+    print(f"  財務データを取得する上位{len(targets)}銘柄を選定しました…")
+
+    def _fund(r):
+        try:
+            return r["code"], fetch_fundamentals(r["code"], edinet_cache), None
+        except Exception as e:
+            return r["code"], None, f"{r['name']} ({r['code']}) 財務データ取得失敗: {e}"
+
+    fund_failures = []
+    with ThreadPoolExecutor(max_workers=INFO_WORKERS) as pool:
+        for i, (code, fund, err) in enumerate(pool.map(_fund, targets), 1):
+            if fund is not None:
+                next(r for r in targets if r["code"] == code).update(fund)
+            else:
+                fund_failures.append(err)
+            if i % 25 == 0 or i == len(targets):
+                print(f"  [{i}/{len(targets)}] 財務データ取得済み"
+                      f"{i - len(fund_failures)}件 / 失敗{len(fund_failures)}件")
+
+    # 財務データが取れなかった銘柄は、株価が無くランキングに乗せられない。
+    # 終値で代用して「予算内で買えるか」の判定だけは通す
+    for r in targets:
+        if r.get("price") is None:
+            r["price"] = r.get("last_close")
+    rows = [r for r in targets if r.get("price") is not None]
+    failures.extend(fund_failures)
+    for f in failures[:10]:
+        print(f"  {f}")
+    if len(failures) > 10:
+        print(f"  …ほか{len(failures) - 10}件")
+    print(f"  → {len(rows)}銘柄をランキング対象にします"
+          f"（テクニカル圏外{len(rest)}銘柄は財務データを取らず除外）")
+
+    # 財務データの欠損は rank_score で一律0.5点になる＝割安度が効かなくなる。
+    # 黙って進むと「テクニカルだけで選んだ結果」が通常の推奨に見えるため明示する
+    if targets and len(fund_failures) / len(targets) > FUNDAMENTAL_FAILURE_WARN_RATIO:
+        print(f"\n⚠️  財務データが{len(fund_failures)}/{len(targets)}銘柄で取得できませんでした"
+              "（Yahooのレート制限の可能性）。\n"
+              "    欠損は中立（0.5点）扱いになるため、この結果は実質"
+              "テクニカルのみのランキングです。\n"
+              "    時間を置いて再実行してください。")
 
     df, excluded = build_ranking(rows, market_regime_up=market_regime_up)
 
