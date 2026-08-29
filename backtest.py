@@ -222,6 +222,52 @@ def calc_fib_retracement_pct(
     return (swing_high - pullback_low) / swing_high * 100
 
 
+def calc_ichimoku_sanyaku(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
+    """
+    一目均衡表の「三役好転」（株価チャート大全 由来）。以下3条件が揃った日を
+    強い買いサインとする。転換した瞬間（前日は不成立）だけTrueを返す。
+      ①転換線（9日）が基準線（26日）を上抜け
+      ②遅行線（終値を26日前にずらした線）が26日前の株価を上抜け
+      ③株価が雲（先行スパン1と2の間）を上抜け
+    """
+    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
+    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
+    span_a = ((tenkan + kijun) / 2).shift(26)
+    span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    cloud_top = pd.concat([span_a, span_b], axis=1).max(axis=1)
+
+    cond = (
+        (tenkan > kijun)
+        & (close > close.shift(26))   # 遅行線が26日前の株価より上
+        & (close > cloud_top)
+    ).fillna(False)
+    return (cond & ~cond.shift(1).fillna(False)).astype(bool)
+
+
+def calc_macd_golden_cross(close: pd.Series) -> pd.Series:
+    """
+    MACD（12日EMA−26日EMA）がシグナル線（MACDの9日EMA）を上抜けた日
+    ＝ゴールデンクロス（株価チャート大全 由来）。
+    """
+    macd = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+    signal_line = macd.ewm(span=9, adjust=False).mean()
+    above = macd > signal_line
+    return (above & ~above.shift(1).fillna(False)).fillna(False).astype(bool)
+
+
+def calc_bandwalk_start(close: pd.Series, period: int = 20) -> pd.Series:
+    """
+    ボリンジャーバンドの「バンドウォーク」入り（株価チャート大全 由来）。
+    終値が+1σを上抜けた日＝強いトレンドに乗り始めたサインとして扱う
+    （±3σの逆張りとは逆に、バンドウォークは順張りに使う、と同書にある）。
+    """
+    ma = close.rolling(period).mean()
+    sd = close.rolling(period).std()
+    upper1 = ma + sd
+    above = close > upper1
+    return (above & ~above.shift(1).fillna(False)).fillna(False).astype(bool)
+
+
 def fetch_market_regime_adx(period: str = "5y", adx_threshold: float = 20.0) -> pd.Series:
     """
     マーケットレジームフィルターのADX版。「終値が100日線より上」（方向）に
@@ -373,6 +419,9 @@ def backtest_ticker(
         calc_takuri_daki_confirmed(open_, high, low, close, candle_lookback)
         if candle_filter else None
     )
+    ichimoku_sig = calc_ichimoku_sanyaku(high, low, close) if "ichimoku" in entry_mode else None
+    macd_sig = calc_macd_golden_cross(close) if "macd" in entry_mode else None
+    bandwalk_sig = calc_bandwalk_start(close) if "bandwalk" in entry_mode else None
     fib_retracement = calc_fib_retracement_pct(close) if fib_filter else None
 
     ma_periods = (5, 10, 20, 50, 100)
@@ -410,12 +459,25 @@ def backtest_ticker(
                 prev_c <= prev_s and c > sma5.iloc[i]
                 and c > o and sma5.iloc[i] > sma5.iloc[i - 4]
             )
-            if entry_mode == "pullback":
-                signal = pullback_sig
-            elif entry_mode == "either":
-                signal = kahanshin_sig or pullback_sig
-            else:
+            # entry_mode はシグナル名を "+" で連結した集合として扱う
+            # （例 "either" = 下半身+押し目買い、"either+macd" = さらにMACD追加）
+            if entry_mode == "kahanshin":
                 signal = kahanshin_sig
+            elif entry_mode == "pullback":
+                signal = pullback_sig
+            else:
+                parts = entry_mode.split("+")
+                signal = False
+                if "either" in parts or "kahanshin" in parts:
+                    signal = signal or kahanshin_sig
+                if "either" in parts or "pullback" in parts:
+                    signal = signal or pullback_sig
+                if "ichimoku" in parts:
+                    signal = signal or bool(ichimoku_sig.iloc[i])
+                if "macd" in parts:
+                    signal = signal or bool(macd_sig.iloc[i])
+                if "bandwalk" in parts:
+                    signal = signal or bool(bandwalk_sig.iloc[i])
 
             if signal and trend_filter:
                 if pd.isna(sma[100].iloc[i]):
@@ -574,13 +636,14 @@ def main():
     # タイムストップの日数は "ts30" / "ts90" のような引数で上書きできる（既定は60日）
     ts_args = [a for a in sys.argv[2:] if a.startswith("ts") and a[2:].isdigit()]
     time_stop_days = int(ts_args[0][2:]) if ts_args else 60
-    # "pullback" で押し目買い型、"either" で「下半身 or 押し目買い」に切り替える
-    if "either" in sys.argv[2:]:
-        entry_mode = "either"
-    elif "pullback" in sys.argv[2:]:
-        entry_mode = "pullback"
-    else:
-        entry_mode = "kahanshin"
+    # エントリー方式は引数の組み合わせで決まる。指定できるシグナル名は
+    # kahanshin / pullback / either（＝前2つ）/ ichimoku / macd / bandwalk。
+    # 複数指定すると「どれか点灯で買い」になる（例: either macd）
+    entry_parts = [
+        a for a in sys.argv[2:]
+        if a in ("kahanshin", "pullback", "either", "ichimoku", "macd", "bandwalk")
+    ]
+    entry_mode = "+".join(entry_parts) if entry_parts else "kahanshin"
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -623,10 +686,11 @@ def main():
         "time_or_sl": f"タイムストップ{time_stop_days}日 or 損切り-{stop_loss_pct:.0f}%の早い方",
         "time_dev_sl": f"タイムストップ{time_stop_days}日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
     }.get(exit_mode, f"{exit_period}日線割れ")
-    entry_desc = {
-        "pullback": "押し目買い（上昇トレンド中に20日線まで押して反発）",
-        "either": "下半身 or 押し目買い（どちらか点灯で買い）",
-    }.get(entry_mode, "下半身")
+    _names = {
+        "kahanshin": "下半身", "pullback": "押し目買い", "either": "下半身/押し目買い",
+        "ichimoku": "一目三役好転", "macd": "MACD GC", "bandwalk": "バンドウォーク",
+    }
+    entry_desc = " or ".join(_names.get(p, p) for p in entry_mode.split("+"))
     print(f"{len(tickers)}銘柄で{entry_desc}バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
