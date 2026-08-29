@@ -18,17 +18,51 @@ LOT_SIZE = 100
 HOLDING_DAYS_LIMIT = 60
 STOP_LOSS_PCT = 10.0
 
-# 過去実績の統計（backtest.py の採用ルールを過去26年・3,152トレードで
-# 集計した値）。これは「予測」ではなく実績の分布であることに注意。
-# 直近5年（強気相場）だと +10%到達32.1% / 損切り到達23.3% とかなり良く
-# 見えるが、26年で見ると下記のとおり損切り到達のほうが多い。楽観的に
-# 見せないため長期の数字を採用している。
+# 利確目標は「エントリー価格＋ATR×3」で銘柄ごとに算出する。
+# ATR（Average True Range）はその銘柄の値動きの荒さなので、荒い銘柄ほど
+# 目標が遠く、穏やかな銘柄ほど近くなる。全銘柄一律の固定%より実態に合う。
+#
+# analyze_targets.py で4方式を過去トレードに当てはめて検証した結果：
+#   直近高値      目標+1.6%  到達率90.5%  ← 目標が近すぎて意味をなさない
+#   ATR×3        目標+7.2%  到達率65.7%  ← 採用
+#   フィボ127.2%  目標+7.6%  到達率62.5%
+#   固定+10.3%    目標+10.3% 到達率52.6%
+# 目標の高さと到達率は逆相関する（高い目標ほど届かない）ので「どれが優秀か」
+# ではなくバランスの問題。ATR×3は現実的な高さと到達率を両立し、かつ
+# フィボナッチよりスイングの取り方に左右されず安定して計算できる。
+ATR_PERIOD = 14
+ATR_MULTIPLE = 3.0
+TARGET_HIT_RATE = 65.7     # ATR×3の目標に到達した割合（保有期間中の高値ベース）
+
+# 損切りと期待値は backtest.py の採用ルールを過去26年3,152トレードで集計した値。
 # ルールを変更したら必ず取り直すこと：
 #   python backtest.py timesl either trend marketadx volume rs sl10 max
-TARGET_PCT = 10.3          # 勝ちトレードのリターン中央値
-TARGET_HIT_RATE = 26.7     # +10%以上に到達した割合
 STOP_HIT_RATE = 30.5       # 損切り-10%に到達した割合
 EXPECTED_PCT = 2.87        # 1トレードあたりの期待値（平均リターン）
+
+
+def fetch_atr(code: str) -> float:
+    """
+    銘柄のATR（値動きの荒さ）を返す。取得できなければ None。
+    利確目標を銘柄ごとに変えるために使う。
+    """
+    try:
+        import pandas as pd
+        import yfinance as yf
+
+        hist = yf.Ticker(code).history(period="3mo")
+        if len(hist) < ATR_PERIOD + 5:
+            return None
+        prev_close = hist["Close"].shift(1)
+        tr = pd.concat([
+            hist["High"] - hist["Low"],
+            (hist["High"] - prev_close).abs(),
+            (hist["Low"] - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean().iloc[-1]
+        return float(atr) if atr == atr and atr > 0 else None
+    except Exception:
+        return None
 
 
 def format_pick(r) -> str:
@@ -42,8 +76,19 @@ def format_pick(r) -> str:
     price = float(r["price"])
     cost = price * LOT_SIZE
 
-    target_price = price * (1 + TARGET_PCT / 100)
-    target_gain = cost * TARGET_PCT / 100
+    # 利確目標は銘柄ごとのATRから決める（荒い銘柄ほど目標が遠くなる）
+    atr = fetch_atr(str(r["code"]))
+    if atr is None:
+        target_line = "  利確目安 算出不可（値動きデータ不足）"
+    else:
+        target_price = price + ATR_MULTIPLE * atr
+        target_pct = (target_price - price) / price * 100
+        target_gain = (target_price - price) * LOT_SIZE
+        target_line = (
+            f"  利確目安 {target_price:,.0f}円(+{target_pct:.1f}%) = +{target_gain:,.0f}円"
+            f" ※到達{TARGET_HIT_RATE:.0f}%"
+        )
+
     stop_price = price * (1 - STOP_LOSS_PCT / 100)
     stop_loss = cost * STOP_LOSS_PCT / 100
 
@@ -58,8 +103,7 @@ def format_pick(r) -> str:
     return (
         f"[{code}]{r['name']}{tag_txt} 現物買い\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
-        f"  利確目安 {target_price:,.0f}円(+{TARGET_PCT:.1f}%) = +{target_gain:,.0f}円"
-        f" ※到達{TARGET_HIT_RATE:.0f}%\n"
+        f"{target_line}\n"
         f"  損切り  {stop_price:,.0f}円(-{STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円"
         f" ※到達{STOP_HIT_RATE:.0f}%\n"
         f"  期限 保有{HOLDING_DAYS_LIMIT}日で手仕舞い"
@@ -96,7 +140,8 @@ def build_message() -> str:
 
     header = "本日のおすすめ（すべて現物買い・空売りではない）"
     footer = (
-        f"※利確/損切りの%は過去26年3,152トレードの実績分布であり予測ではない。"
+        f"※利確目安は銘柄ごとのATR×{ATR_MULTIPLE:.0f}（値動きの荒さ）から算出。"
+        f"到達率は過去トレードでの実測値であり予測ではない。"
         f"期待値は1トレードあたり+{EXPECTED_PCT:.1f}%"
     )
     if weak_regime:
