@@ -285,6 +285,8 @@ def backtest_ticker(
     fib_filter: bool = False,
     fib_low: float = 25.0,
     fib_high: float = 65.0,
+    profit_target_pct: float = 10.0,
+    stop_loss_pct: float = 10.0,
 ) -> list[dict]:
     """
     エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
@@ -323,6 +325,19 @@ def backtest_ticker(
                               以上上方乖離したら手仕舞い（グランビルの法則④の
                               逆張り利確を踏まえた早期利確エグジット）
       exit_mode="ppp_or_dev" PPP崩れ or 上記乖離エグジットの早い方で手仕舞い
+      exit_mode="time_and_dev" タイムストップ or 乖離エグジットの早い方
+                              （PPP崩れは見ない＝一時的な下げで振り落とされない）
+      exit_mode="ppp_or_time_or_dev" PPP崩れ or タイムストップ or 乖離エグジット
+                              の3つのうち最も早いもので手仕舞い
+      exit_mode="profit_target" 含み益が profit_target_pct % に達したら利確
+                              （純粋な固定利確目標。損切りはしないので
+                              負けポジションは期間末まで持ち越される点に注意）
+      exit_mode="ppp_or_target" PPP崩れ or 固定利確目標の早い方で手仕舞い
+      exit_mode="time_or_sl" タイムストップ or 損切り（含み損が stop_loss_pct %
+                              に達したら手仕舞い）の早い方。タイムストップ単独は
+                              損切りが一切効かず平均損失が約2倍になるため、
+                              その弱点を補う折衷案
+      exit_mode="time_dev_sl" タイムストップ or 乖離利確 or 損切りの最も早いもの
     """
     close = hist["Close"]
     open_ = hist["Open"]
@@ -337,7 +352,9 @@ def backtest_ticker(
     rsi = calc_rsi(close) if rsi_filter else None
     sma_dev = (
         close.rolling(dev_ma_period).mean()
-        if dev_filter or exit_mode in ("dev_exit", "ppp_or_dev")
+        if dev_filter or exit_mode in (
+            "dev_exit", "ppp_or_dev", "time_and_dev", "ppp_or_time_or_dev", "time_dev_sl"
+        )
         else None
     )
     candle_confirmed = (
@@ -449,6 +466,8 @@ def backtest_ticker(
                 and (c - sma_dev.iloc[i]) / sma_dev.iloc[i] * 100 >= exit_dev_threshold
                 if sma_dev is not None else False
             )
+            target_hit = (c - entry_price) / entry_price * 100 >= profit_target_pct
+            sl_hit = (c - entry_price) / entry_price * 100 <= -stop_loss_pct
             if exit_mode == "ppp_break":
                 should_exit = ppp_break_hit
             elif exit_mode == "atr_trail":
@@ -463,6 +482,18 @@ def backtest_ticker(
                 should_exit = dev_hit
             elif exit_mode == "ppp_or_dev":
                 should_exit = ppp_break_hit or dev_hit
+            elif exit_mode == "time_and_dev":
+                should_exit = time_hit or dev_hit
+            elif exit_mode == "ppp_or_time_or_dev":
+                should_exit = ppp_break_hit or time_hit or dev_hit
+            elif exit_mode == "profit_target":
+                should_exit = target_hit
+            elif exit_mode == "ppp_or_target":
+                should_exit = ppp_break_hit or target_hit
+            elif exit_mode == "time_or_sl":
+                should_exit = time_hit or sl_hit
+            elif exit_mode == "time_dev_sl":
+                should_exit = time_hit or dev_hit or sl_hit
             else:
                 should_exit = c < sma_exit.iloc[i]
             if should_exit:
@@ -495,6 +526,9 @@ def main():
         "ppp": "ppp_break", "atrtrail": "atr_trail", "pporatr": "ppp_or_atr",
         "timestop": "time_stop", "pportime": "ppp_or_time",
         "devexit": "dev_exit", "ppordev": "ppp_or_dev",
+        "timeanddev": "time_and_dev", "pportimeordev": "ppp_or_time_or_dev",
+        "target": "profit_target", "pportarget": "ppp_or_target",
+        "timesl": "time_or_sl", "timedevsl": "time_dev_sl",
     }
     exit_mode = exit_mode_map.get(arg1, "ma")
     exit_period = 20 if exit_mode != "ma" else int(arg1)
@@ -510,6 +544,9 @@ def main():
     use_dev_filter = "dev" in sys.argv[2:]
     use_candle_filter = "candle" in sys.argv[2:]
     use_fib_filter = "fib" in sys.argv[2:]
+    # 損切り幅は "sl10" / "sl15" のような引数で上書きできる（既定は10%）
+    sl_args = [a for a in sys.argv[2:] if a.startswith("sl") and a[2:].isdigit()]
+    stop_loss_pct = float(sl_args[0][2:]) if sl_args else 10.0
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -545,6 +582,12 @@ def main():
         "ppp_or_time": "PPP崩れ or タイムストップの早い方",
         "dev_exit": "株価が25日線から20%以上上方乖離（グランビル法則④の早期利確）",
         "ppp_or_dev": "PPP崩れ or 乖離エグジットの早い方",
+        "time_and_dev": "タイムストップ60日 or 乖離20%の早い方（PPP崩れは見ない）",
+        "ppp_or_time_or_dev": "PPP崩れ or タイムストップ60日 or 乖離20%の最も早いもの",
+        "profit_target": "含み益が10%に達したら利確（固定利確目標・損切りなし）",
+        "ppp_or_target": "PPP崩れ or 固定利確目標10%の早い方",
+        "time_or_sl": f"タイムストップ60日 or 損切り-{stop_loss_pct:.0f}%の早い方",
+        "time_dev_sl": f"タイムストップ60日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
     }.get(exit_mode, f"{exit_period}日線割れ")
     print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
@@ -605,6 +648,7 @@ def main():
                 nikkei_close=nikkei_close if use_rs_filter else None, earnings_dates=earnings_dates,
                 sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
                 candle_filter=use_candle_filter, fib_filter=use_fib_filter,
+                stop_loss_pct=stop_loss_pct,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -640,6 +684,9 @@ def main():
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
         "dev_exit": "devexit", "ppp_or_dev": "ppordev",
+        "time_and_dev": "timeanddev", "ppp_or_time_or_dev": "pportimeordev",
+        "profit_target": "target", "ppp_or_target": "pportarget",
+        "time_or_sl": f"timesl{stop_loss_pct:.0f}", "time_dev_sl": f"timedevsl{stop_loss_pct:.0f}",
     }.get(exit_mode, f"exit{exit_period}")
     out_path = OUTPUT_DIR / f"backtest_trades_{tag}{suffix}_{history_period}_{dt.date.today():%Y%m%d}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
