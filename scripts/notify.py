@@ -147,7 +147,7 @@ def format_pick(r, names: dict) -> str:
     tag_txt = f"[{'/'.join(tags)}]" if tags else ""
 
     return (
-        f"[{code}]{display_name(str(r['code']), r['name'], names)}{tag_txt} 現物買い\n"
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}{tag_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"{target_line}\n"
         f"  損切り  {stop_price:,.0f}円(-{STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円"
