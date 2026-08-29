@@ -170,6 +170,23 @@ def format_pick(r, names: dict) -> str:
     )
 
 
+# 採用ルールの各条件と、満たしていないときに通知へ出す短い説明
+CONDITION_LABELS = [
+    ("cond_signal", "買いシグナル"),
+    ("cond_trend", "PPP3/4以上＋100日線上"),
+    ("cond_volume", "出来高1.5倍以上"),
+    ("cond_rs", "日経をアウトパフォーム"),
+    ("cond_regime", "日経がADX20超の上昇"),
+]
+
+
+def missing_note(row) -> str:
+    """満たしていない条件を列挙した1行を返す。"""
+    missing = [label for key, label in CONDITION_LABELS if not bool(row.get(key))]
+    met = len(CONDITION_LABELS) - len(missing)
+    return f"  条件 {met}/{len(CONDITION_LABELS)} ・未達: {' / '.join(missing)}"
+
+
 def build_message() -> str:
     files = sorted(glob.glob("output/recommend_*.csv"))
     if not files:
@@ -180,18 +197,19 @@ def build_message() -> str:
     df = pd.read_csv(files[-1]).sort_values("total_score", ascending=False)
 
     names = load_japanese_names()
-    picks = []
-    weak_regime = False
-    for _, r in df.iterrows():
-        buy = r.get("buy_timing")
-        if isinstance(buy, str) and "買いタイミング" in buy:
-            picks.append(format_pick(r, names))
-            if "地合いが弱い" in buy:
-                weak_regime = True
-        if len(picks) >= PICK_COUNT:
-            break
 
-    if not picks:
+    # 買いシグナルが点灯している行だけを候補にする
+    cand = [r for _, r in df.iterrows()
+            if isinstance(r.get("buy_timing"), str) and "買いタイミング" in r["buy_timing"]]
+
+    # 採用ルールの全条件を満たす銘柄と、一部しか満たさない銘柄を分ける。
+    # バックテストの成績（勝率60.6%・PF2.65）は全条件が揃った場合の数字で、
+    # 一部しか満たさない銘柄に当てはめてはいけないため、混ぜて出さない
+    full = [r for r in cand if bool(r.get("conditions_all"))]
+    partial = sorted([r for r in cand if not bool(r.get("conditions_all"))],
+                     key=lambda r: -int(r.get("conditions_met", 0)))
+
+    if not cand:
         top = df.iloc[0]
         return (
             f"本日は買いシグナルなし。上位候補: "
@@ -200,16 +218,27 @@ def build_message() -> str:
             f"({top['price']:,.0f}円) {top['trend_label']}"
         )
 
-    header = "本日のおすすめ（すべて現物買い）"
+    parts = []
+    if full:
+        parts.append(f"◆本命（採用ルールの条件をすべて満たす）{len(full)}件")
+        parts += [format_pick(r, names) for r in full[:PICK_COUNT]]
+    else:
+        parts.append("◆本命（全条件を満たす銘柄）: 本日はなし")
+
+    if partial:
+        parts.append(f"◇参考（条件を一部満たす）※成績の裏付けは弱い")
+        for r in partial[:PICK_COUNT]:
+            parts.append(format_pick(r, names) + "\n" + missing_note(r))
+
     footer = (
         f"※利確目安は銘柄ごとのATR×{ATR_MULTIPLE:.0f}（値動きの荒さ）から算出。"
         f"到達率は目標の高さ別の実測値であり予測ではない。"
-        f"期待値は1トレードあたり+{EXPECTED_PCT:.1f}%"
+        f"期待値+{EXPECTED_PCT:.1f}%は◆本命の条件で検証した値"
     )
-    if weak_regime:
+    if cand and not bool(cand[0].get("cond_regime", True)):
         footer += "\n⚠️日経がレンジ相場（ADX20未満）。この局面は過去の成績が落ちるため慎重に"
 
-    return "\n\n".join([header] + picks + [footer])
+    return "\n\n".join(["本日のおすすめ（すべて現物買い）"] + parts + [footer])
 
 
 def main():

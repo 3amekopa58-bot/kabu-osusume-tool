@@ -787,6 +787,18 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
         "graham_score", "current_ratio_score", "debt_score",
     ]].mean(axis=1)
 
+    # 採用ルール（backtest.py で検証した条件一式）を満たしているかを列に落とす。
+    # 通知側で buy_timing の文字列を解析すると、文言を変えたときに静かに壊れる
+    pool["cond_signal"] = pool["kahanshin"] | pool.get("pullback", False)
+    pool["cond_trend"] = pool["trend_filter_pass"].fillna(False).astype(bool)
+    pool["cond_volume"] = pool["volume_confirmed"].fillna(False).astype(bool)
+    pool["cond_rs"] = pool["relative_strength_confirmed"].fillna(False).astype(bool)
+    pool["cond_regime"] = bool(market_regime_up)
+    cond_cols = ["cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime"]
+    pool["conditions_met"] = pool[cond_cols].sum(axis=1)
+    # 全条件を満たす行だけが、バックテストの成績（勝率60.6%/PF2.65）の前提に合う
+    pool["conditions_all"] = pool["conditions_met"] == len(cond_cols)
+
     pool["technical_score"] = pool.apply(lambda r: technical_score(r, market_regime_up), axis=1)
     pool["trend_label"] = pool.apply(trend_label, axis=1)
     pool["td_label"] = pool.apply(td_label, axis=1)
@@ -901,6 +913,8 @@ def main():
         "sma5", "sma10", "sma20", "sma50", "sma100", "ppp_matches", "trend_filter_pass",
         "volume_ratio", "volume_confirmed", "relative_strength_confirmed", "dev_from_sma25_pct",
         "kahanshin", "pullback",
+        "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
+        "conditions_met", "conditions_all",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
