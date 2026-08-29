@@ -68,8 +68,9 @@ TRADING_DAYS_PER_YEAR = 252
 TAX_RATE = 0.20315
 
 
-def load_tickers():
-    with open(TICKERS_CSV, encoding="utf-8-sig") as f:
+def load_tickers(path=None):
+    """既定は日経225（tickers.csv）。universe.csv 等を渡せば対象を差し替えられる。"""
+    with open(path or TICKERS_CSV, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
 
@@ -253,14 +254,29 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
 
 
 def main():
-    period = sys.argv[1] if len(sys.argv) > 1 else "5y"
-    rule = sys.argv[2] if len(sys.argv) > 2 else "volume"
+    # "--tickers <パス>" は位置引数として数えない（rule に紛れ込ませないため）
+    positional = []
+    skip = False
+    for a in sys.argv[1:]:
+        if skip:
+            skip = False
+            continue
+        if a == "--tickers":
+            skip = True
+            continue
+        positional.append(a)
+    period = positional[0] if positional else "5y"
+    rule = positional[1] if len(positional) > 1 else "volume"
     # "parkindex" を付けると、個別株を買っていない余剰資金を日経ETFで運用する
     park_index = "parkindex" in sys.argv[2:]
     # "tax" を付けると譲渡益課税（年ごとの損益通算後に20.315%）を考慮する
     apply_tax = "tax" in sys.argv[2:]
 
-    tickers = load_tickers()
+    # "--tickers <パス>" で対象銘柄を差し替えられる（例: universe.csv）
+    tickers_path = sys.argv[sys.argv.index("--tickers") + 1] if "--tickers" in sys.argv else None
+    tickers = load_tickers(tickers_path)
+    print(f"対象銘柄: {len(tickers)}件"
+          f"（{Path(tickers_path).name if tickers_path else 'tickers.csv'}）")
     print(f"{len(tickers)}銘柄・過去{period}・選択ルール={rule} でポートフォリオ"
           f"シミュレーションを実行します（初期資金{INITIAL_CAPITAL:,}円・"
           f"{LOT_SIZE}株単位・往復コスト{COST_PCT}%）…")
