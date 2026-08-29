@@ -101,15 +101,30 @@ def build_signals(hist: pd.DataFrame, nikkei_close: pd.Series) -> pd.DataFrame:
 
 
 def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
-             calendar: pd.DatetimeIndex, rule: str, seed: int = 0) -> dict:
-    """資金を実際に回しながら日次でシミュレーションする。"""
+             calendar: pd.DatetimeIndex, rule: str, seed: int = 0,
+             park_cash_in_index: pd.Series = None) -> dict:
+    """
+    資金を実際に回しながら日次でシミュレーションする。
+    park_cash_in_index に日経平均の終値を渡すと、個別株を買っていない
+    余剰資金を日経平均のETFで運用しているものとして日次で増減させる
+    （「シグナルが出ていない間は現金」という構造的弱点への対処案の検証用）。
+    """
     rng = random.Random(seed)
     capital = float(INITIAL_CAPITAL)
     positions = {}   # code -> dict(entry_price, entry_date, shares)
     trades = []
     equity_curve = []
+    deployed_ratios = []
+
+    index_ret = (
+        park_cash_in_index.reindex(calendar, method="ffill").pct_change().fillna(0.0)
+        if park_cash_in_index is not None else None
+    )
 
     for day in calendar:
+        # 余剰資金をインデックスで運用する場合、日々その分だけ増減させる
+        if index_ret is not None:
+            capital *= (1 + float(index_ret.get(day, 0.0)))
         # --- 1) 手仕舞い判定（保有60日 or 買値-10%） ---
         for code in list(positions.keys()):
             pos = positions[code]
@@ -163,7 +178,9 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
                 holdings_value += float(df.at[day, "close"]) * pos["shares"]
             else:
                 holdings_value += pos["entry_price"] * pos["shares"]
-        equity_curve.append(capital + holdings_value)
+        total = capital + holdings_value
+        equity_curve.append(total)
+        deployed_ratios.append(holdings_value / total if total > 0 else 0.0)
 
     eq = pd.Series(equity_curve, index=calendar)
     peak = eq.cummax()
@@ -177,6 +194,7 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
         "win_rate": (tdf["return_pct"] > 0).mean() * 100 if len(tdf) else float("nan"),
         "avg_return_pct": tdf["return_pct"].mean() if len(tdf) else float("nan"),
         "max_trade_return": tdf["return_pct"].max() if len(tdf) else float("nan"),
+        "avg_deployed_pct": sum(deployed_ratios) / len(deployed_ratios) * 100,
         "equity": eq,
     }
 
@@ -184,6 +202,8 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
 def main():
     period = sys.argv[1] if len(sys.argv) > 1 else "5y"
     rule = sys.argv[2] if len(sys.argv) > 2 else "volume"
+    # "parkindex" を付けると、個別株を買っていない余剰資金を日経ETFで運用する
+    park_index = "parkindex" in sys.argv[2:]
 
     tickers = load_tickers()
     print(f"{len(tickers)}銘柄・過去{period}・選択ルール={rule} でポートフォリオ"
@@ -238,7 +258,8 @@ def main():
                   f"（最小 {min(vals):+.1f} / 最大 {max(vals):+.1f}）")
         return
 
-    r = simulate(sig_map, name_map, regime, calendar, rule)
+    r = simulate(sig_map, name_map, regime, calendar, rule,
+                 park_cash_in_index=nikkei_close if park_index else None)
 
     # 日経平均との比較は「シミュレーションと同一期間」に揃える。
     # period="max" の ^N225 は1965年まで遡るため、そのまま比較すると
@@ -247,11 +268,14 @@ def main():
                           & (nikkei_close.index <= calendar[-1])]
     nikkei_ret = (nk.iloc[-1] - nk.iloc[0]) / nk.iloc[0] * 100
 
-    print(f"\n=== ポートフォリオシミュレーション結果（{rule}）===")
+    mode = "・余剰資金は日経ETFで運用" if park_index else ""
+    print(f"\n=== ポートフォリオシミュレーション結果（{rule}{mode}）===")
     print(f"対象期間: {calendar[0].date()} 〜 {calendar[-1].date()}")
     print(f"初期資金: {INITIAL_CAPITAL:,}円 → 最終資産: {r['final']:,.0f}円")
     print(f"トータルリターン: {r['total_return_pct']:+.1f}%")
     print(f"最大ドローダウン: {r['max_drawdown_pct']:.1f}%")
+    print(f"個別株への平均投入率: {r['avg_deployed_pct']:.1f}%"
+          f"（残りは{'日経ETF' if park_index else '現金'}）")
     print(f"トレード数: {r['n_trades']}件 / 勝率: {r['win_rate']:.1f}% "
           f"/ 平均リターン: {r['avg_return_pct']:+.2f}%")
     print(f"（参考）同期間の日経平均を持ち切った場合: {nikkei_ret:+.1f}%")
