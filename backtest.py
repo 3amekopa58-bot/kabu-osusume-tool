@@ -287,9 +287,18 @@ def backtest_ticker(
     fib_high: float = 65.0,
     profit_target_pct: float = 10.0,
     stop_loss_pct: float = 10.0,
+    entry_mode: str = "kahanshin",
+    pullback_tolerance: float = 2.0,
 ) -> list[dict]:
     """
-    エントリー: 下半身シグナル（5日線が上向き＋陽線で5日線を上抜け）で固定。
+    エントリー:
+      entry_mode="kahanshin"（既定）下半身シグナル（5日線が上向き＋陽線で
+        5日線を上抜け）。ブレイクした瞬間を買う順張り型。
+      entry_mode="pullback" 押し目買い型（グランビルの法則②③由来）。
+        上昇トレンド中に株価が20日線まで押し（安値が20日線＋
+        pullback_tolerance%以内まで下落）、当日陽線で20日線より上に
+        戻して反発したところを買う。下半身とは「ブレイクを買うか、
+        押し目を買うか」という根本的に逆の発想。
     trend_filter=True の場合、さらに「PPP一致度がmin_ppp_matches以上」
     「株価が100日線より上」の強いトレンド条件を満たす下半身だけを採用する。
     market_regime を渡した場合、日経平均自体が上昇トレンドの日だけ新規エントリーを許可する。
@@ -388,10 +397,16 @@ def backtest_ticker(
         prev_c, prev_s = close.iloc[i - 1], sma5.iloc[i - 1]
 
         if not in_position:
-            crossed_above = prev_c <= prev_s and c > sma5.iloc[i]
-            is_bullish = c > o
-            slope_up = sma5.iloc[i] > sma5.iloc[i - 4]
-            signal = crossed_above and is_bullish and slope_up
+            if entry_mode == "pullback":
+                # 押し目買い：上昇トレンド中に20日線まで押して反発した日を買う
+                touched_ma = low.iloc[i] <= sma20.iloc[i] * (1 + pullback_tolerance / 100)
+                bounced = c > o and c > sma20.iloc[i]
+                signal = bool(touched_ma and bounced)
+            else:
+                crossed_above = prev_c <= prev_s and c > sma5.iloc[i]
+                is_bullish = c > o
+                slope_up = sma5.iloc[i] > sma5.iloc[i - 4]
+                signal = crossed_above and is_bullish and slope_up
 
             if signal and trend_filter:
                 if pd.isna(sma[100].iloc[i]):
@@ -550,6 +565,8 @@ def main():
     # タイムストップの日数は "ts30" / "ts90" のような引数で上書きできる（既定は60日）
     ts_args = [a for a in sys.argv[2:] if a.startswith("ts") and a[2:].isdigit()]
     time_stop_days = int(ts_args[0][2:]) if ts_args else 60
+    # "pullback" を付けるとエントリーを下半身から押し目買い型に切り替える
+    entry_mode = "pullback" if "pullback" in sys.argv[2:] else "kahanshin"
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -592,7 +609,8 @@ def main():
         "time_or_sl": f"タイムストップ{time_stop_days}日 or 損切り-{stop_loss_pct:.0f}%の早い方",
         "time_dev_sl": f"タイムストップ{time_stop_days}日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
     }.get(exit_mode, f"{exit_period}日線割れ")
-    print(f"{len(tickers)}銘柄で下半身バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
+    entry_desc = "押し目買い（上昇トレンド中に20日線まで押して反発）" if entry_mode == "pullback" else "下半身"
+    print(f"{len(tickers)}銘柄で{entry_desc}バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
     if use_market_regime_ppp:
@@ -652,6 +670,7 @@ def main():
                 sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
                 candle_filter=use_candle_filter, fib_filter=use_fib_filter,
                 stop_loss_pct=stop_loss_pct, time_stop_days=time_stop_days,
+                entry_mode=entry_mode,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -682,7 +701,7 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
+    suffix = ("_pullback" if entry_mode == "pullback" else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
@@ -702,7 +721,7 @@ def main():
     avg_bh = sum(bh_returns) / len(bh_returns) if bh_returns else float("nan")
 
     print(f"\n完了: {out_path}")
-    print(f"\n=== 下半身シグナル バックテスト結果（エグジット={exit_desc}） ===")
+    print(f"\n=== {entry_desc}シグナル バックテスト結果（エグジット={exit_desc}） ===")
     print(f"総トレード数: {len(df)}件（対象{len(bh_returns)}銘柄）")
     print(f"勝率: {win_rate:.1f}%")
     print(f"平均リターン: {avg_return:+.2f}% / トレード")
