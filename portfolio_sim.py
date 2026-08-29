@@ -61,6 +61,11 @@ ETF_TRADE_COST_PCT = 0.05   # ETFの片道売買コスト（スプレッド＋�
 ETF_EXPENSE_RATIO = 0.0015  # 信託報酬 年0.15%
 TRADING_DAYS_PER_YEAR = 252
 
+# 譲渡益課税（所得税15%＋復興特別所得税0.315%＋住民税5%）。
+# その年の実現損益を通算し、プラスなら年末に課税する（損益通算は再現するが、
+# 3年間の繰越控除は再現していない＝実際よりやや不利に出る）。
+TAX_RATE = 0.20315
+
 
 def load_tickers():
     with open(TICKERS_CSV, encoding="utf-8-sig") as f:
@@ -110,7 +115,7 @@ def build_signals(hist: pd.DataFrame, nikkei_close: pd.Series) -> pd.DataFrame:
 
 def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
              calendar: pd.DatetimeIndex, rule: str, seed: int = 0,
-             park_cash_in_index: pd.Series = None) -> dict:
+             park_cash_in_index: pd.Series = None, apply_tax: bool = False) -> dict:
     """
     資金を実際に回しながら日次でシミュレーションする。
     park_cash_in_index に日経平均の終値を渡すと、個別株を買っていない
@@ -128,8 +133,26 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
         park_cash_in_index.reindex(calendar, method="ffill").pct_change().fillna(0.0)
         if park_cash_in_index is not None else None
     )
+    # ETFで運用している資金の取得原価（譲渡益課税の計算に使う）
+    etf_basis = float(INITIAL_CAPITAL)
+    realized_gain_this_year = 0.0
+    total_tax_paid = 0.0
+    current_year = calendar[0].year
+    stock_cost_one_way = COST_PCT / 2 / 100  # 往復コストの片道分
 
     for day in calendar:
+        # --- 0) 年が変わったら、前年の実現益に課税する ---
+        if apply_tax and day.year != current_year:
+            if realized_gain_this_year > 0:
+                tax = realized_gain_this_year * TAX_RATE
+                capital -= tax
+                total_tax_paid += tax
+                if index_ret is not None:
+                    # 納税分はETFを取り崩して払う＝その分だけ原価も減る
+                    etf_basis = max(0.0, etf_basis - tax)
+            realized_gain_this_year = 0.0
+            current_year = day.year
+
         # 余剰資金をインデックスで運用する場合、日々その分だけ増減させ、
         # 信託報酬を日割りで差し引く
         if index_ret is not None:
@@ -145,10 +168,13 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
             held_days = (day - pos["entry_date"]).days
             loss_pct = (price - pos["entry_price"]) / pos["entry_price"] * 100
             if held_days >= HOLDING_DAYS_LIMIT or loss_pct <= -STOP_LOSS_PCT:
-                proceeds = price * pos["shares"]
+                # 個別株の売却コストを引いた手取り
+                proceeds = price * pos["shares"] * (1 - stock_cost_one_way)
+                realized_gain_this_year += proceeds - pos["cost_basis"]
                 # 売却代金をETFに戻す際の買付コスト
                 if index_ret is not None:
                     proceeds -= proceeds * ETF_TRADE_COST_PCT / 100
+                    etf_basis += proceeds
                 capital += proceeds
                 trades.append({
                     "code": code, "name": name_map[code],
@@ -177,14 +203,22 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
                 candidates.sort(key=lambda x: x[0])
 
             for code, price, _ in candidates:
-                cost = price * LOT_SIZE
-                # 個別株を買う原資はETFを売って作るため、その売却コストも要る
+                # 個別株の購入コスト（買付手数料込み）
+                stock_outlay = price * LOT_SIZE * (1 + stock_cost_one_way)
+                cost = stock_outlay
+                # 原資はETFを売って作るため、その売却コストも要る
                 if index_ret is not None:
                     cost += price * LOT_SIZE * ETF_TRADE_COST_PCT / 100
                 if cost <= capital:
+                    if index_ret is not None and capital > 0:
+                        # ETFを取り崩した分だけ含み益が実現する
+                        gain_ratio = 1 - (etf_basis / capital) if capital > 0 else 0
+                        realized_gain_this_year += cost * gain_ratio
+                        etf_basis -= cost * (etf_basis / capital)
                     capital -= cost
                     positions[code] = {
                         "entry_price": price, "entry_date": day, "shares": LOT_SIZE,
+                        "cost_basis": stock_outlay,
                     }
 
         # --- 3) 時価評価 ---
@@ -212,6 +246,7 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
         "avg_return_pct": tdf["return_pct"].mean() if len(tdf) else float("nan"),
         "max_trade_return": tdf["return_pct"].max() if len(tdf) else float("nan"),
         "avg_deployed_pct": sum(deployed_ratios) / len(deployed_ratios) * 100,
+        "total_tax_paid": total_tax_paid,
         "equity": eq,
     }
 
@@ -221,6 +256,8 @@ def main():
     rule = sys.argv[2] if len(sys.argv) > 2 else "volume"
     # "parkindex" を付けると、個別株を買っていない余剰資金を日経ETFで運用する
     park_index = "parkindex" in sys.argv[2:]
+    # "tax" を付けると譲渡益課税（年ごとの損益通算後に20.315%）を考慮する
+    apply_tax = "tax" in sys.argv[2:]
 
     tickers = load_tickers()
     print(f"{len(tickers)}銘柄・過去{period}・選択ルール={rule} でポートフォリオ"
@@ -276,7 +313,8 @@ def main():
         return
 
     r = simulate(sig_map, name_map, regime, calendar, rule,
-                 park_cash_in_index=nikkei_close if park_index else None)
+                 park_cash_in_index=nikkei_close if park_index else None,
+                 apply_tax=apply_tax)
 
     # 日経平均との比較は「シミュレーションと同一期間」に揃える。
     # period="max" の ^N225 は1965年まで遡るため、そのまま比較すると
@@ -287,6 +325,8 @@ def main():
 
     mode = (f"・余剰資金は日経ETFで運用（ETF売買{ETF_TRADE_COST_PCT}%片道・"
             f"信託報酬年{ETF_EXPENSE_RATIO*100:.2f}%込み）") if park_index else ""
+    if apply_tax:
+        mode += f"・譲渡益課税{TAX_RATE*100:.3f}%込み"
     print(f"\n=== ポートフォリオシミュレーション結果（{rule}{mode}）===")
     print(f"対象期間: {calendar[0].date()} 〜 {calendar[-1].date()}")
     print(f"初期資金: {INITIAL_CAPITAL:,}円 → 最終資産: {r['final']:,.0f}円")
@@ -296,7 +336,14 @@ def main():
           f"（残りは{'日経ETF' if park_index else '現金'}）")
     print(f"トレード数: {r['n_trades']}件 / 勝率: {r['win_rate']:.1f}% "
           f"/ 平均リターン: {r['avg_return_pct']:+.2f}%")
-    print(f"（参考）同期間の日経平均を持ち切った場合: {nikkei_ret:+.1f}%")
+    if apply_tax:
+        print(f"支払った税金の累計: {r['total_tax_paid']:,.0f}円")
+        # 買い持ちは売るまで課税されないため、最後に一度だけ課税して比較する
+        nikkei_after_tax = nikkei_ret * (1 - TAX_RATE)
+        print(f"（参考）同期間の日経平均を持ち切った場合: {nikkei_ret:+.1f}%"
+              f" → 最後に売却して納税後 {nikkei_after_tax:+.1f}%")
+    else:
+        print(f"（参考）同期間の日経平均を持ち切った場合: {nikkei_ret:+.1f}%")
     if pd.notna(r["max_trade_return"]) and r["max_trade_return"] > SUSPICIOUS_RETURN_THRESHOLD:
         print(f"\n⚠️  1トレードで{r['max_trade_return']:.0f}%という異常なリターンが"
               "含まれています。データ不整合の可能性があるため結果を鵜呑みにしないでください。")
