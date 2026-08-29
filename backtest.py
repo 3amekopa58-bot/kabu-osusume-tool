@@ -336,6 +336,7 @@ def backtest_ticker(
     entry_mode: str = "kahanshin",
     pullback_tolerance: float = 2.0,
     cost_pct: float = 0.0,
+    side: str = "long",
 ) -> list[dict]:
     """
     エントリー:
@@ -450,16 +451,29 @@ def backtest_ticker(
         prev_c, prev_s = close.iloc[i - 1], sma5.iloc[i - 1]
 
         if not in_position:
-            # 押し目買い：上昇トレンド中に20日線まで押して反発した日を買う
-            pullback_sig = bool(
-                low.iloc[i] <= sma20.iloc[i] * (1 + pullback_tolerance / 100)
-                and c > o and c > sma20.iloc[i]
-            )
-            # 下半身：5日線が上向き＋陽線で5日線を上抜けた日を買う
-            kahanshin_sig = bool(
-                prev_c <= prev_s and c > sma5.iloc[i]
-                and c > o and sma5.iloc[i] > sma5.iloc[i - 4]
-            )
+            if side == "short":
+                # 空売り側は買い側を上下反転させた条件にする。
+                # 逆下半身：5日線が下向き＋陰線で5日線を下抜けた日に売る
+                kahanshin_sig = bool(
+                    prev_c >= prev_s and c < sma5.iloc[i]
+                    and c < o and sma5.iloc[i] < sma5.iloc[i - 4]
+                )
+                # 戻り売り：下降トレンド中に20日線まで戻して陰線で反落した日
+                pullback_sig = bool(
+                    high.iloc[i] >= sma20.iloc[i] * (1 - pullback_tolerance / 100)
+                    and c < o and c < sma20.iloc[i]
+                )
+            else:
+                # 押し目買い：上昇トレンド中に20日線まで押して反発した日を買う
+                pullback_sig = bool(
+                    low.iloc[i] <= sma20.iloc[i] * (1 + pullback_tolerance / 100)
+                    and c > o and c > sma20.iloc[i]
+                )
+                # 下半身：5日線が上向き＋陽線で5日線を上抜けた日を買う
+                kahanshin_sig = bool(
+                    prev_c <= prev_s and c > sma5.iloc[i]
+                    and c > o and sma5.iloc[i] > sma5.iloc[i - 4]
+                )
             # entry_mode はシグナル名を "+" で連結した集合として扱う
             # （例 "either" = 下半身+押し目買い、"either+macd" = さらにMACD追加）
             if entry_mode == "kahanshin":
@@ -483,6 +497,13 @@ def backtest_ticker(
             if signal and trend_filter:
                 if pd.isna(sma[100].iloc[i]):
                     signal = False
+                elif side == "short":
+                    # 空売り側は逆PPP（短期線ほど下）＋100日線より下を条件にする
+                    ppp_matches = sum(
+                        sma[ma_periods[j]].iloc[i] < sma[ma_periods[j + 1]].iloc[i]
+                        for j in range(len(ma_periods) - 1)
+                    )
+                    signal = ppp_matches >= min_ppp_matches and c < sma[100].iloc[i]
                 else:
                     ppp_matches = sum(
                         sma[ma_periods[j]].iloc[i] > sma[ma_periods[j + 1]].iloc[i]
@@ -492,7 +513,11 @@ def backtest_ticker(
 
             if signal and regime_aligned is not None:
                 regime_ok = regime_aligned.iloc[i]
-                signal = bool(regime_ok) if pd.notna(regime_ok) else False
+                # 空売りは地合いが悪い（下降トレンド）ときに仕掛けるので反転させる
+                if side == "short":
+                    signal = (not bool(regime_ok)) if pd.notna(regime_ok) else False
+                else:
+                    signal = bool(regime_ok) if pd.notna(regime_ok) else False
 
             if signal and volume_filter:
                 if pd.isna(vol_avg20.iloc[i]) or vol_avg20.iloc[i] == 0:
@@ -502,7 +527,11 @@ def backtest_ticker(
 
             if signal and rs_signal is not None:
                 rs_ok = rs_signal.iloc[i]
-                signal = bool(rs_ok) if pd.notna(rs_ok) else False
+                # 空売りは日経平均をアンダーパフォームしている銘柄を狙う
+                if side == "short":
+                    signal = (not bool(rs_ok)) if pd.notna(rs_ok) else False
+                else:
+                    signal = bool(rs_ok) if pd.notna(rs_ok) else False
 
             if signal and earnings_dates:
                 today = close.index[i].date()
@@ -553,8 +582,13 @@ def backtest_ticker(
                 and (c - sma_dev.iloc[i]) / sma_dev.iloc[i] * 100 >= exit_dev_threshold
                 if sma_dev is not None else False
             )
-            target_hit = (c - entry_price) / entry_price * 100 >= profit_target_pct
-            sl_hit = (c - entry_price) / entry_price * 100 <= -stop_loss_pct
+            # 空売りは値下がりが利益なので、損益の符号を反転させて判定する
+            pnl_pct = (
+                (entry_price - c) / entry_price * 100 if side == "short"
+                else (c - entry_price) / entry_price * 100
+            )
+            target_hit = pnl_pct >= profit_target_pct
+            sl_hit = pnl_pct <= -stop_loss_pct
             if exit_mode == "ppp_break":
                 should_exit = ppp_break_hit
             elif exit_mode == "atr_trail":
@@ -587,7 +621,10 @@ def backtest_ticker(
                 exit_price = float(c)
                 exit_date = close.index[i]
                 # 往復の取引コスト（手数料＋スリッページ）を控除した実質リターン
-                ret_pct = (exit_price - entry_price) / entry_price * 100 - cost_pct
+                if side == "short":
+                    ret_pct = (entry_price - exit_price) / entry_price * 100 - cost_pct
+                else:
+                    ret_pct = (exit_price - entry_price) / entry_price * 100 - cost_pct
                 trades.append({
                     "code": code,
                     "name": name,
@@ -650,6 +687,8 @@ def main():
     # （既定は0＝コスト無視。過去の検証結果と数値を比較できるようにするため）
     cost_args = [a for a in sys.argv[2:] if a.startswith("cost") and a[4:].isdigit()]
     cost_pct = float(cost_args[0][4:]) / 100 if cost_args else 0.0
+    # "short" を付けると空売り側（条件をすべて上下反転）を検証する
+    side = "short" if "short" in sys.argv[2:] else "long"
     period_args = [a for a in sys.argv[2:] if a == "max" or (a.endswith("y") and a[:-1].isdigit())]
     history_period = period_args[0] if period_args else HISTORY_PERIOD
 
@@ -698,7 +737,7 @@ def main():
         "kahanshin": "下半身", "pullback": "押し目買い", "either": "下半身/押し目買い",
         "ichimoku": "一目三役好転", "macd": "MACD GC", "bandwalk": "バンドウォーク",
     }
-    entry_desc = " or ".join(_names.get(p, p) for p in entry_mode.split("+"))
+    entry_desc = ("【空売り】" if side == "short" else "") + " or ".join(_names.get(p, p) for p in entry_mode.split("+"))
     print(f"{len(tickers)}銘柄で{entry_desc}バックテストを実行します（過去{history_period}、エグジット={exit_desc}、エントリー条件={filter_desc}）…")
 
     market_regime = None
@@ -759,7 +798,7 @@ def main():
                 sector_regime=sector_regime, rsi_filter=use_rsi_filter, dev_filter=use_dev_filter,
                 candle_filter=use_candle_filter, fib_filter=use_fib_filter,
                 stop_loss_pct=stop_loss_pct, time_stop_days=time_stop_days,
-                entry_mode=entry_mode, cost_pct=cost_pct,
+                entry_mode=entry_mode, cost_pct=cost_pct, side=side,
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -790,7 +829,9 @@ def main():
         market_suffix = "_market"
     else:
         market_suffix = ""
-    suffix = (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
+    # side を必ずファイル名に含める（含めないと空売りの結果が買いの結果を
+    # 上書きしてしまう。2026-08-29に実際に上書き事故を起こしたため明示）
+    suffix = ("_short" if side == "short" else "") + (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
