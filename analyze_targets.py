@@ -114,6 +114,11 @@ def main():
         print("集計できるトレードがありませんでした。")
         return
 
+    # 再集計できるよう明細を保存する（株価の再取得は数分かかるため）
+    detail_path = BASE_DIR / "output" / "target_analysis_detail.csv"
+    res.to_csv(detail_path, index=False, encoding="utf-8-sig")
+    print(f"明細を保存しました: {detail_path}\n")
+
     print(f"\n集計対象: {len(res)}トレード\n")
     print("=" * 74)
     print("各方式の目標の「高さ」と「到達率」")
@@ -140,6 +145,18 @@ def main():
     tbl = band.groupby("帯", observed=True).agg(件数=("hit", "size"), 到達率=("hit", "mean"))
     tbl["到達率"] = (tbl["到達率"] * 100).round(1)
     print(tbl.to_string())
+
+    print("\n" + "=" * 74)
+    print("採用方式（ATR×3）の目標の高さ別・到達率 ※通知に埋め込む値")
+    print("=" * 74)
+    a = res[["pct_ATR×3", "hit_ATR×3"]].dropna()
+    a.columns = ["pct", "hit"]
+    a["帯"] = pd.cut(a["pct"], [0, 4, 6, 8, 10, 1000],
+                     labels=["〜4%", "4-6%", "6-8%", "8-10%", "10%〜"])
+    t2 = a.groupby("帯", observed=True).agg(件数=("hit", "size"), 到達率=("hit", "mean"))
+    t2["到達率"] = (t2["到達率"] * 100).round(1)
+    print(t2.to_string())
+    print("※通知では銘柄ごとの目標の高さに応じてこの到達率を出し分ける")
 
 
 if __name__ == "__main__":

@@ -6,8 +6,10 @@ ntfy.sh 経由でプッシュ通知する。CSVが無い（screen.pyが失敗し
 """
 
 import glob
+import json
 import os
 import urllib.request
+from pathlib import Path
 
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 
@@ -32,13 +34,57 @@ STOP_LOSS_PCT = 10.0
 # フィボナッチよりスイングの取り方に左右されず安定して計算できる。
 ATR_PERIOD = 14
 ATR_MULTIPLE = 3.0
-TARGET_HIT_RATE = 65.7     # ATR×3の目標に到達した割合（保有期間中の高値ベース）
+
+# 到達率は目標の高さによって変わる（高い目標ほど届かない）ため、
+# 全銘柄一律ではなく銘柄ごとの目標の高さに応じて出し分ける。
+# analyze_targets.py の「ATR×3の目標の高さ別・到達率」の実測値：
+#   〜6%: 70.7%(150件) / 6-8%: 66.7%(192件) / 8-10%: 62.7%(110件) / 10%〜: 54.8%(84件)
+# （〜4%は10件しかないため4-6%帯に統合している）
+TARGET_HIT_RATE_BANDS = [
+    (6.0, 71),
+    (8.0, 67),
+    (10.0, 63),
+    (float("inf"), 55),
+]
+
+
+def hit_rate_for(target_pct: float) -> int:
+    """目標の高さ（%）に対応する到達率を返す。"""
+    for upper, rate in TARGET_HIT_RATE_BANDS:
+        if target_pct < upper:
+            return rate
+    return TARGET_HIT_RATE_BANDS[-1][1]
 
 # 損切りと期待値は backtest.py の採用ルールを過去26年3,152トレードで集計した値。
 # ルールを変更したら必ず取り直すこと：
 #   python backtest.py timesl either trend marketadx volume rs sl10 max
 STOP_HIT_RATE = 30.5       # 損切り-10%に到達した割合
 EXPECTED_PCT = 2.87        # 1トレードあたりの期待値（平均リターン）
+
+
+def load_japanese_names() -> dict:
+    """
+    証券コード -> 日本語社名 の対応表。yfinanceは日本株でも英語名しか
+    返さないため、EDINET由来の対応表を使う
+    （scripts/build_japanese_names.py で生成）。
+    """
+    path = Path(__file__).parent.parent / "data" / "japanese_names.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def display_name(code: str, fallback: str, names: dict) -> str:
+    """通知用の銘柄名。日本語名があれば使い、冗長な「株式会社」は落とす。"""
+    ja = names.get(code)
+    if not ja:
+        return str(fallback)
+    for token in ("株式会社", "(株)", "（株）"):
+        ja = ja.replace(token, "")
+    return ja.replace("　", "").strip() or str(fallback)
 
 
 def fetch_atr(code: str) -> float:
@@ -65,7 +111,7 @@ def fetch_atr(code: str) -> float:
         return None
 
 
-def format_pick(r) -> str:
+def format_pick(r, names: dict) -> str:
     """
     1銘柄ぶんの通知テキスト。現物買いを前提とし、利確目安・損切り・期限を示す。
     「利確目安」は予測ではなく過去実績の中央値であり、そこに到達する割合は
@@ -86,7 +132,7 @@ def format_pick(r) -> str:
         target_gain = (target_price - price) * LOT_SIZE
         target_line = (
             f"  利確目安 {target_price:,.0f}円(+{target_pct:.1f}%) = +{target_gain:,.0f}円"
-            f" ※到達{TARGET_HIT_RATE:.0f}%"
+            f" ※到達{hit_rate_for(target_pct)}%"
         )
 
     stop_price = price * (1 - STOP_LOSS_PCT / 100)
@@ -101,7 +147,7 @@ def format_pick(r) -> str:
     tag_txt = f"[{'/'.join(tags)}]" if tags else ""
 
     return (
-        f"[{code}]{r['name']}{tag_txt} 現物買い\n"
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}{tag_txt} 現物買い\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"{target_line}\n"
         f"  損切り  {stop_price:,.0f}円(-{STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円"
@@ -119,12 +165,13 @@ def build_message() -> str:
 
     df = pd.read_csv(files[-1]).sort_values("total_score", ascending=False)
 
+    names = load_japanese_names()
     picks = []
     weak_regime = False
     for _, r in df.iterrows():
         buy = r.get("buy_timing")
         if isinstance(buy, str) and "買いタイミング" in buy:
-            picks.append(format_pick(r))
+            picks.append(format_pick(r, names))
             if "地合いが弱い" in buy:
                 weak_regime = True
         if len(picks) >= PICK_COUNT:
@@ -134,14 +181,15 @@ def build_message() -> str:
         top = df.iloc[0]
         return (
             f"本日は買いシグナルなし。上位候補: "
-            f"[{str(top['code']).replace('.T', '')}]{top['name']}"
+            f"[{str(top['code']).replace('.T', '')}]"
+            f"{display_name(str(top['code']), top['name'], names)}"
             f"({top['price']:,.0f}円) {top['trend_label']}"
         )
 
-    header = "本日のおすすめ（すべて現物買い・空売りではない）"
+    header = "本日のおすすめ（すべて現物買い）"
     footer = (
         f"※利確目安は銘柄ごとのATR×{ATR_MULTIPLE:.0f}（値動きの荒さ）から算出。"
-        f"到達率は過去トレードでの実測値であり予測ではない。"
+        f"到達率は目標の高さ別の実測値であり予測ではない。"
         f"期待値は1トレードあたり+{EXPECTED_PCT:.1f}%"
     )
     if weak_regime:
