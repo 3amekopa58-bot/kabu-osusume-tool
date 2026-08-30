@@ -74,6 +74,14 @@ def hit_rate_for(target_pct: float) -> int:
 STOP_HIT_RATE = 30.4       # 損切り-10%に到達した割合
 EXPECTED_PCT = 3.04        # 1トレードあたりの期待値（平均リターン）
 
+# --- 片山流「新高値ブレイク投資」（別系統。REQUIREMENTS 4.4-14）---
+# 14年576トレードの実測値。現行ルールとは損切り幅も期限の有無も違うので
+# 同じ枠に混ぜず、専用の表示にする
+KATAYAMA_STOP_LOSS_PCT = 8.0    # 損切り-8%（片山氏が「-20〜30%は甘すぎる」と明言）
+KATAYAMA_WIN_RATE = 51.4
+KATAYAMA_PF = 3.04
+KATAYAMA_EXPECTED_PCT = 4.80
+
 
 def load_japanese_names() -> dict:
     """
@@ -170,6 +178,33 @@ def format_pick(r, names: dict) -> str:
     )
 
 
+def format_katayama_pick(r, names: dict) -> str:
+    """
+    片山流の1銘柄ぶん。現行ルールと違い**利確目標も保有期限も置かない**
+    （上昇が続く限り持ち、-8%で損切り）ので、その旨を明示する。
+    """
+    code = str(r["code"]).replace(".T", "")
+    price = float(r["price"])
+    cost = price * LOT_SIZE
+    stop_price = price * (1 - KATAYAMA_STOP_LOSS_PCT / 100)
+    stop_loss = cost * KATAYAMA_STOP_LOSS_PCT / 100
+
+    def pct(v):
+        try:
+            return f"{float(v):+.0f}%"
+        except (TypeError, ValueError):
+            return "?"
+
+    return (
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]\n"
+        f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
+        f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
+        f" / PER{float(r['per']):.1f}倍\n"
+        f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
+        f"  利確目標なし・期限なし（上昇が続く限り持つ）"
+    )
+
+
 # 採用ルールの各条件と、満たしていないときに通知へ出す短い説明
 CONDITION_LABELS = [
     ("cond_signal", "買いシグナル"),
@@ -209,7 +244,7 @@ def build_message() -> str:
     partial = sorted([r for r in cand if not bool(r.get("conditions_all"))],
                      key=lambda r: -int(r.get("conditions_met", 0)))
 
-    if not cand:
+    if not cand and not any(bool(r.get("katayama")) for _, r in df.iterrows()):
         top = df.iloc[0]
         return (
             f"本日は買いシグナルなし。上位候補: "
@@ -229,6 +264,17 @@ def build_message() -> str:
         parts.append(f"◇参考（条件を一部満たす）※成績の裏付けは弱い")
         for r in partial[:PICK_COUNT]:
             parts.append(format_pick(r, names) + "\n" + missing_note(r))
+
+    # 片山流（別系統）。現行ルールと買う位置が正反対なので混ぜず末尾に別枠で出す
+    kata = [r for _, r in df.iterrows() if bool(r.get("katayama"))]
+    if kata:
+        parts.append(f"★片山流・新高値ブレイク（別系統）{len(kata)}件")
+        parts += [format_katayama_pick(r, names) for r in kata[:PICK_COUNT]]
+        parts.append(
+            f"　※14年576件で勝率{KATAYAMA_WIN_RATE:.0f}%・PF{KATAYAMA_PF:.1f}・"
+            f"平均{KATAYAMA_EXPECTED_PCT:+.1f}%。現行ルールより当たり外れが大きい"
+            "（2018/2021/2022年は負け越し）"
+        )
 
     footer = (
         f"※利確目安は銘柄ごとのATR×{ATR_MULTIPLE:.0f}（値動きの荒さ）から算出。"

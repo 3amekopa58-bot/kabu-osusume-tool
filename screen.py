@@ -44,6 +44,17 @@ RATE_LIMIT_WAIT_SEC = 5
 # 警告する（欠損は一律0.5点として扱われるため、黙っていると
 # 「テクニカルだけで選んだ結果」が通常の推奨に見えてしまう）
 FUNDAMENTAL_FAILURE_WARN_RATIO = 0.3
+
+# --- 片山流「新高値ブレイク投資」（別系統。片山晃_ルール.md / REQUIREMENTS 4.4-14）---
+# 現行ルールとは買う位置が正反対（押し目 vs 新高値）なので、同じスコアに混ぜず
+# 別枠で出す。14年5,768件の検証で、勝率はほぼ同じままPFが1.83倍・平均リターンが
+# 1.85倍になった条件を使う（件数は13分の1）
+NEW_HIGH_PERIOD = 250          # 52週高値。著者が現在使っている期間
+KATAYAMA_MIN_OP_GROWTH = 30.0  # 営業（経常/税引前）増益率の下限%
+KATAYAMA_MIN_REV_GROWTH = 10.0 # 増収率の下限%
+KATAYAMA_MAX_PER = 20.0        # PERの上限
+KATAYAMA_STOP_LOSS_PCT = 8.0   # 損切り-8%（現行ルールの-10%より厳しい）
+EDINET_FINANCIALS_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
 OUTPUT_DIR = BASE_DIR / "output"
 EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
 
@@ -518,6 +529,15 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None,
 
         # 押し目買い：安値が20日線＋2%以内まで押し、陽線で20日線より上に戻した
         sma20_now = sma[20].iloc[-1]
+        # 新高値ブレイク（片山流）。過去NEW_HIGH_PERIOD営業日の最高値を更新したか
+        if len(close) > NEW_HIGH_PERIOD:
+            prev_max = close.iloc[-(NEW_HIGH_PERIOD + 1):-1].max()
+            row["new_high"] = bool(row["last_close"] > prev_max)
+            row["new_high_ref"] = float(prev_max)
+        else:
+            row["new_high"] = False
+            row["new_high_ref"] = None
+
         row["pullback"] = bool(
             pd.notna(sma20_now)
             and low.iloc[-1] <= sma20_now * (1 + PULLBACK_TOLERANCE_PCT / 100)
@@ -759,6 +779,44 @@ def rank_score(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
     return pct.fillna(0.5)
 
 
+def load_growth() -> dict:
+    """
+    EDINETの決算データから、銘柄ごとの直近の増収率・増益率を出す。
+    通信不要（scripts/build_edinet_financials.py が作ったファイルを読むだけ）。
+
+    ⚠️ available_from（決算期末+92日＝有報の提出期限）を過ぎた決算だけを使う。
+    まだ公表されていない決算を使うと、実運用でも再現できない推奨になる。
+    """
+    if not EDINET_FINANCIALS_PATH.exists():
+        return {}
+    data = json.loads(EDINET_FINANCIALS_PATH.read_text(encoding="utf-8"))["data"]
+    today = dt.date.today().isoformat()
+    out = {}
+    for code, periods in data.items():
+        recs = sorted((r for r in periods.values() if r.get("available_from", "") <= today),
+                      key=lambda r: r["period_end"])
+        if len(recs) < 2:
+            continue
+        cur, prev = recs[-1], recs[-2]
+        # EDINET版は営業利益を持たず経常利益（IFRSは税引前利益）。
+        # 「利益の伸び」を見る目的なのであるほうを使う
+        pkey = "operating_income" if cur.get("operating_income") is not None else "ordinary_income"
+
+        def rate(key):
+            a, b = cur.get(key), prev.get(key)
+            if a is None or b is None or not b or b <= 0:
+                return None
+            return (a - b) / b * 100
+
+        out[code] = {
+            "revenue_growth": rate("revenue"),
+            "profit_growth": rate(pkey),
+            "period_end": cur["period_end"],
+            "eps": cur.get("eps"),
+        }
+    return out
+
+
 def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool = True) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
@@ -804,6 +862,16 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["td_label"] = pool.apply(td_label, axis=1)
     pool["buy_timing"] = pool.apply(lambda r: buy_timing(r, market_regime_up), axis=1)
     pool["sell_timing"] = pool.apply(sell_timing, axis=1)
+
+    # --- 片山流（別系統・REQUIREMENTS 4.4-14）---
+    # 現行スコアとは混ぜない。新高値＋高成長＋割安の3条件を満たすかだけを見る
+    per = pool["per"]
+    pool["katayama"] = (
+        pool["new_high"].fillna(False).astype(bool)
+        & (pool["profit_growth"].fillna(-999) >= KATAYAMA_MIN_OP_GROWTH)
+        & (pool["revenue_growth"].fillna(-999) >= KATAYAMA_MIN_REV_GROWTH)
+        & per.notna() & (per > 0) & (per < KATAYAMA_MAX_PER)
+    )
 
     pool["total_score"] = (
         pool["fundamental_score"] * FUNDAMENTAL_WEIGHT
@@ -851,6 +919,13 @@ def main():
     # info は1銘柄1リクエストで、944銘柄ぶん投げるとYahooに
     # 「Too Many Requests」で弾かれ全滅する（2026-08-29に実際に発生）。
     # 圏外の銘柄は総合スコアで上位に来る余地がないため、実質の損失はない。
+    # 決算データ（通信不要）を各行に載せる。片山流の判定に使う
+    growth = load_growth()
+    for r in rows:
+        g = growth.get(r["code"], {})
+        r["revenue_growth"] = g.get("revenue_growth")
+        r["profit_growth"] = g.get("profit_growth")
+
     def _tech(r):
         # 株価データが短い銘柄は指標が揃わない。順位付けの前段なので0点扱いにする
         try:
@@ -860,7 +935,21 @@ def main():
 
     rows.sort(key=_tech, reverse=True)
     targets, rest = rows[:FUNDAMENTAL_POOL_SIZE], rows[FUNDAMENTAL_POOL_SIZE:]
-    print(f"  財務データを取得する上位{len(targets)}銘柄を選定しました…")
+
+    # 片山流の候補は「新高値＋高成長」で、押し目狙いのテクニカルスコアでは
+    # 上位に来ないことが多い。圏外にいる候補も財務データの取得対象に加える
+    # （加えないとPERが埋まらず、片山流の判定が常に不成立になる）
+    picked = {id(r) for r in targets}
+    extra = [r for r in rest
+             if r.get("new_high")
+             and (r.get("profit_growth") or -999) >= KATAYAMA_MIN_OP_GROWTH
+             and (r.get("revenue_growth") or -999) >= KATAYAMA_MIN_REV_GROWTH
+             and id(r) not in picked]
+    if extra:
+        targets = targets + extra
+        rest = [r for r in rest if id(r) not in {id(x) for x in extra}]
+    print(f"  財務データを取得する{len(targets)}銘柄を選定しました"
+          f"（テクニカル上位{FUNDAMENTAL_POOL_SIZE} ＋ 片山流候補{len(extra)}）…")
 
     def _fund(r):
         try:
@@ -915,6 +1004,7 @@ def main():
         "kahanshin", "pullback",
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
+        "new_high", "revenue_growth", "profit_growth", "katayama",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
