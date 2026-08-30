@@ -147,6 +147,8 @@ ntfy.sh でプッシュ通知する（トピック名はGitHub Secretsの`NTFY_T
 | `backtest.py` | 売買ルールの検証（トレード単位の勝率・PF） |
 | `compare.py` | 複数の売買ルールを1プロセスでまとめて比較し表で出す |
 | `analyze_sensitivity.py` | シミュレーション結果のノイズ幅を実測する |
+| `analyze_fundamentals.py` | 割安度（PER・PBR）がトレード成績に寄与しているか検証 |
+| `scripts/build_fundamental_history.py` | 過去の決算データ（EPS/BPS）を集める |
 | `price_cache.py` | 株価のローカルキャッシュ（他スクリプトから使う） |
 | `portfolio_sim.py` | 予算・コスト・税金を入れた現実的な資産推移の検証 |
 | `scripts/build_universe.py` | 全上場銘柄から売買可能な銘柄ユニバースを作る |
@@ -208,6 +210,9 @@ python3 compare.py "timesl trend marketadx volume rs either ; timesl trend marke
    「戦略に有利に働く」と書いていたが、実際に測ると逆だった。上場廃止の
    95.6%は買収・MBO（株主はプレミアムを受け取る）で、倒産は1.7%しかない。
    「上場廃止＝倒産」という思い込みが誤りだった（4.4-9）
+9. **「検証していない」と「効いていない」は別物**。総合スコアの50%を占める
+   割安度は一度も検証されていなかったが、測ってみるとPERで18.9pt・
+   PBRで24.3ptの勝率差があり、テクニカル条件より選別力が強かった（4.4-10）
 
 ## 注意事項
 
