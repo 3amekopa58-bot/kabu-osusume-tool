@@ -28,16 +28,29 @@ from pathlib import Path
 import pandas as pd
 
 BASE_DIR = Path(__file__).parent
-HISTORY_PATH = BASE_DIR / "data" / "fundamental_history.json"
+# EDINET由来（2013年〜・株式分割調整済み）を優先し、無ければyfinance由来（5期分）
+HISTORY_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
+FALLBACK_HISTORY_PATH = BASE_DIR / "data" / "fundamental_history.json"
 SUSPICIOUS_RETURN_THRESHOLD = 500.0
 
 
 def load_history() -> dict:
-    if not HISTORY_PATH.exists():
-        print(f"{HISTORY_PATH} がありません。"
-              "先に python3 scripts/build_fundamental_history.py を実行してください。")
+    """
+    決算データを {code: [決算期の古い順のレコード]} で返す。
+    EDINET版は {code: {period_end: rec}} という形なのでリストに直す。
+    """
+    path = HISTORY_PATH if HISTORY_PATH.exists() else FALLBACK_HISTORY_PATH
+    if not path.exists():
+        print("決算データがありません。先に "
+              "python3 scripts/build_edinet_financials.py を実行してください。")
         sys.exit(1)
-    return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))["data"]
+    print(f"決算データ: {path.name}")
+    data = json.loads(path.read_text(encoding="utf-8"))["data"]
+    out = {}
+    for code, v in data.items():
+        recs = list(v.values()) if isinstance(v, dict) else v
+        out[code] = sorted(recs, key=lambda r: r["period_end"])
+    return out
 
 
 def latest_available(records: list, as_of: pd.Timestamp) -> dict:
@@ -61,7 +74,10 @@ def growth_at(records: list, as_of: pd.Timestamp):
         if a is None or b is None or not b or b <= 0:
             return None
         return (a - b) / b * 100
-    return rate("revenue"), rate("operating_income")
+    # EDINET由来は operating_income を持たず ordinary_income（IFRSは税引前利益）。
+    # どちらでも「利益の伸び」を見る目的には使えるので、あるほうを使う
+    profit_key = "operating_income" if cur.get("operating_income") is not None else "ordinary_income"
+    return rate("revenue"), rate(profit_key)
 
 
 def band(value, edges, labels):

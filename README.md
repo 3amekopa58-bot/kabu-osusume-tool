@@ -148,7 +148,9 @@ ntfy.sh でプッシュ通知する（トピック名はGitHub Secretsの`NTFY_T
 | `compare.py` | 複数の売買ルールを1プロセスでまとめて比較し表で出す |
 | `analyze_sensitivity.py` | シミュレーション結果のノイズ幅を実測する |
 | `analyze_fundamentals.py` | 割安度（PER・PBR）がトレード成績に寄与しているか検証 |
-| `scripts/build_fundamental_history.py` | 過去の決算データ（EPS/BPS）を集める |
+| `scripts/build_fundamental_history.py` | 過去の決算データをyfinanceから集める（5期分） |
+| `scripts/build_edinet_financials.py` | 決算データをEDINETから集める（2013年〜・14期分） |
+| `scripts/adjust_edinet_split.py` | EDINETのBPS/EPSを株価と同じ分割調整基準に揃える |
 | `price_cache.py` | 株価のローカルキャッシュ（他スクリプトから使う） |
 | `portfolio_sim.py` | 予算・コスト・税金を入れた現実的な資産推移の検証 |
 | `scripts/build_universe.py` | 全上場銘柄から売買可能な銘柄ユニバースを作る |
