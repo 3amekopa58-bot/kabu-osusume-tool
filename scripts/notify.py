@@ -78,9 +78,19 @@ EXPECTED_PCT = 3.04        # 1トレードあたりの期待値（平均リタ�
 # 14年576トレードの実測値。現行ルールとは損切り幅も期限の有無も違うので
 # 同じ枠に混ぜず、専用の表示にする
 KATAYAMA_STOP_LOSS_PCT = 8.0    # 損切り-8%（片山氏が「-20〜30%は甘すぎる」と明言）
-KATAYAMA_WIN_RATE = 51.4
-KATAYAMA_PF = 3.04
-KATAYAMA_EXPECTED_PCT = 4.80
+# 書籍に明記された条件と、このツールの検証で最も成績が良かった条件は
+# PERで食い違う（著者は「PER30倍台まで買い」、検証では30倍台がPF0.50）。
+# どちらが実際に機能するかを見るため、両方を別々に出す（REQUIREMENTS 4.4-15）
+KATAYAMA_VARIANTS = {
+    "katayama_book": {
+        "label": "書籍版（増収10%↑・増益20%↑・ROE10%↑・PER39倍以下）",
+        "stats": "14年388件で勝率46%・PF2.96・平均+5.3%",
+    },
+    "katayama_tested": {
+        "label": "検証版（増収10%↑・増益30%↑・PER20倍未満）",
+        "stats": "14年576件で勝率51%・PF3.04・平均+4.8%",
+    },
+}
 
 
 def load_japanese_names() -> dict:
@@ -195,11 +205,13 @@ def format_katayama_pick(r, names: dict) -> str:
         except (TypeError, ValueError):
             return "?"
 
+    roe = r.get("roe")
+    roe_txt = f" / ROE{float(roe):.0f}%" if roe is not None and roe == roe else ""
     return (
         f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
-        f" / PER{float(r['per']):.1f}倍\n"
+        f" / PER{float(r['per']):.1f}倍{roe_txt}\n"
         f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
         f"  利確目標なし・期限なし（上昇が続く限り持つ）"
     )
@@ -265,15 +277,21 @@ def build_message() -> str:
         for r in partial[:PICK_COUNT]:
             parts.append(format_pick(r, names) + "\n" + missing_note(r))
 
-    # 片山流（別系統）。現行ルールと買う位置が正反対なので混ぜず末尾に別枠で出す
-    kata = [r for _, r in df.iterrows() if bool(r.get("katayama"))]
-    if kata:
-        parts.append(f"★片山流・新高値ブレイク（別系統）{len(kata)}件")
-        parts += [format_katayama_pick(r, names) for r in kata[:PICK_COUNT]]
+    # 片山流（別系統）。現行ルールと買う位置が正反対なので混ぜず末尾に別枠で出す。
+    # 書籍版と検証版はPERの条件が食い違うので、それぞれ分けて出す
+    any_kata = False
+    for key, spec in KATAYAMA_VARIANTS.items():
+        picks = [r for _, r in df.iterrows() if bool(r.get(key))]
+        if not picks:
+            continue
+        any_kata = True
+        parts.append(f"★片山流・{spec['label']} {len(picks)}件")
+        parts += [format_katayama_pick(r, names) for r in picks[:PICK_COUNT]]
+        parts.append(f"　※{spec['stats']}")
+    if any_kata:
         parts.append(
-            f"　※14年576件で勝率{KATAYAMA_WIN_RATE:.0f}%・PF{KATAYAMA_PF:.1f}・"
-            f"平均{KATAYAMA_EXPECTED_PCT:+.1f}%。現行ルールより当たり外れが大きい"
-            "（2018/2021/2022年は負け越し）"
+            "　※片山流は現行ルールより当たり外れが大きい（2018/2021/2022年は負け越し）。"
+            "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中"
         )
 
     footer = (

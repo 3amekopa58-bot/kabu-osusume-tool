@@ -50,10 +50,27 @@ FUNDAMENTAL_FAILURE_WARN_RATIO = 0.3
 # 別枠で出す。14年5,768件の検証で、勝率はほぼ同じままPFが1.83倍・平均リターンが
 # 1.85倍になった条件を使う（件数は13分の1）
 NEW_HIGH_PERIOD = 250          # 52週高値。著者が現在使っている期間
-KATAYAMA_MIN_OP_GROWTH = 30.0  # 営業（経常/税引前）増益率の下限%
-KATAYAMA_MIN_REV_GROWTH = 10.0 # 増収率の下限%
-KATAYAMA_MAX_PER = 20.0        # PERの上限
 KATAYAMA_STOP_LOSS_PCT = 8.0   # 損切り-8%（現行ルールの-10%より厳しい）
+
+# 条件は2種類を併記する。書籍に明記された条件と、このツールの検証で最も
+# 成績が良かった条件がPERで食い違うため、どちらが実際に機能するかを
+# 運用しながら見るのが目的（REQUIREMENTS 4.4-15）。
+#
+#   書籍版：増収10%↑・増益20%↑・ROE10%↑・PER39倍以下
+#           （著者は「PER30倍台まで買い、50倍超で売り」「PER15倍未満を
+#            対象にしていてはチャンスを逃す」と明言している）
+#   検証版：増収10%↑・増益30%↑・PER20倍未満
+#           （14年5,768件の検証ではPER30倍台がPF0.50と最悪だった。
+#            著者の対象はグロース市場の中小型株、こちらは全上場から
+#            予算内・流動性で絞った944銘柄なので母集団が違う）
+KATAYAMA_BOOK = {
+    "label": "書籍版", "min_rev": 10.0, "min_profit": 20.0,
+    "min_roe": 10.0, "max_per": 39.0,
+}
+KATAYAMA_TESTED = {
+    "label": "検証版", "min_rev": 10.0, "min_profit": 30.0,
+    "min_roe": None, "max_per": 20.0,
+}
 EDINET_FINANCIALS_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
 OUTPUT_DIR = BASE_DIR / "output"
 EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
@@ -808,9 +825,12 @@ def load_growth() -> dict:
                 return None
             return (a - b) / b * 100
 
+        # ROE＝当期純利益÷自己資本×100（著者がPART 4で追加した条件）
+        ni, na = cur.get("net_income"), cur.get("net_assets")
         out[code] = {
             "revenue_growth": rate("revenue"),
             "profit_growth": rate(pkey),
+            "roe": (ni / na * 100) if (ni is not None and na and na > 0) else None,
             "period_end": cur["period_end"],
             "eps": cur.get("eps"),
         }
@@ -863,15 +883,23 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["buy_timing"] = pool.apply(lambda r: buy_timing(r, market_regime_up), axis=1)
     pool["sell_timing"] = pool.apply(sell_timing, axis=1)
 
-    # --- 片山流（別系統・REQUIREMENTS 4.4-14）---
-    # 現行スコアとは混ぜない。新高値＋高成長＋割安の3条件を満たすかだけを見る
+    # --- 片山流（別系統・REQUIREMENTS 4.4-14/15）---
+    # 現行スコアとは混ぜない。書籍版と検証版の2条件をそれぞれ判定する
     per = pool["per"]
-    pool["katayama"] = (
-        pool["new_high"].fillna(False).astype(bool)
-        & (pool["profit_growth"].fillna(-999) >= KATAYAMA_MIN_OP_GROWTH)
-        & (pool["revenue_growth"].fillna(-999) >= KATAYAMA_MIN_REV_GROWTH)
-        & per.notna() & (per > 0) & (per < KATAYAMA_MAX_PER)
-    )
+    nh = pool["new_high"].fillna(False).astype(bool)
+
+    def _match(spec):
+        m = (nh
+             & (pool["profit_growth"].fillna(-999) >= spec["min_profit"])
+             & (pool["revenue_growth"].fillna(-999) >= spec["min_rev"])
+             & per.notna() & (per > 0) & (per <= spec["max_per"]))
+        if spec["min_roe"] is not None:
+            m &= pool["roe"].fillna(-999) >= spec["min_roe"]
+        return m
+
+    pool["katayama_book"] = _match(KATAYAMA_BOOK)
+    pool["katayama_tested"] = _match(KATAYAMA_TESTED)
+    pool["katayama"] = pool["katayama_book"] | pool["katayama_tested"]
 
     pool["total_score"] = (
         pool["fundamental_score"] * FUNDAMENTAL_WEIGHT
@@ -925,6 +953,7 @@ def main():
         g = growth.get(r["code"], {})
         r["revenue_growth"] = g.get("revenue_growth")
         r["profit_growth"] = g.get("profit_growth")
+        r["roe"] = g.get("roe")
 
     def _tech(r):
         # 株価データが短い銘柄は指標が揃わない。順位付けの前段なので0点扱いにする
@@ -942,8 +971,10 @@ def main():
     picked = {id(r) for r in targets}
     extra = [r for r in rest
              if r.get("new_high")
-             and (r.get("profit_growth") or -999) >= KATAYAMA_MIN_OP_GROWTH
-             and (r.get("revenue_growth") or -999) >= KATAYAMA_MIN_REV_GROWTH
+             and (r.get("profit_growth") or -999) >= min(KATAYAMA_BOOK["min_profit"],
+                                                        KATAYAMA_TESTED["min_profit"])
+             and (r.get("revenue_growth") or -999) >= min(KATAYAMA_BOOK["min_rev"],
+                                                         KATAYAMA_TESTED["min_rev"])
              and id(r) not in picked]
     if extra:
         targets = targets + extra
@@ -1004,7 +1035,8 @@ def main():
         "kahanshin", "pullback",
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
-        "new_high", "revenue_growth", "profit_growth", "katayama",
+        "new_high", "revenue_growth", "profit_growth", "roe",
+        "katayama", "katayama_book", "katayama_tested",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
