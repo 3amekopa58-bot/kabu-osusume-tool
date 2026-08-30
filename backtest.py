@@ -263,6 +263,20 @@ def calc_macd_golden_cross(close: pd.Series) -> pd.Series:
     return (above & ~above.shift(1).fillna(False)).fillna(False).astype(bool)
 
 
+def calc_new_high_break(close: pd.Series, period: int = 250) -> pd.Series:
+    """
+    新高値ブレイク（片山晃『5年で1億貯める株式投資』／原典は林則行）。
+    終値が過去period営業日の最高値を更新した日にTrueを返す。
+    既定250日＝約52週で、著者が現在使っている期間に合わせている
+    （「過去2年」「年初来」「上場来」なども選択肢として挙げられている）。
+
+    このツールの「押し目買い」とは買う位置が正反対（下がったところではなく
+    上がったところを買う）。混ぜずに別系統として検証すること（片山晃_ルール.md）。
+    """
+    prev_max = close.rolling(period).max().shift(1)
+    return (close > prev_max).fillna(False)
+
+
 def calc_bandwalk_start(close: pd.Series, period: int = 20) -> pd.Series:
     """
     ボリンジャーバンドの「バンドウォーク」入り（株価チャート大全 由来）。
@@ -342,6 +356,7 @@ def backtest_ticker(
     profit_target_pct: float = 10.0,
     stop_loss_pct: float = 10.0,
     entry_mode: str = "kahanshin",
+    new_high_period: int = 250,
     pullback_tolerance: float = 2.0,
     cost_pct: float = 0.0,
     side: str = "long",
@@ -432,6 +447,7 @@ def backtest_ticker(
     ichimoku_sig = calc_ichimoku_sanyaku(high, low, close) if "ichimoku" in entry_mode else None
     macd_sig = calc_macd_golden_cross(close) if "macd" in entry_mode else None
     bandwalk_sig = calc_bandwalk_start(close) if "bandwalk" in entry_mode else None
+    newhigh_sig = calc_new_high_break(close, new_high_period) if "newhigh" in entry_mode else None
     fib_retracement = calc_fib_retracement_pct(close) if fib_filter else None
 
     ma_periods = (5, 10, 20, 50, 100)
@@ -501,6 +517,8 @@ def backtest_ticker(
                     signal = signal or bool(macd_sig.iloc[i])
                 if "bandwalk" in parts:
                     signal = signal or bool(bandwalk_sig.iloc[i])
+                if "newhigh" in parts:
+                    signal = signal or bool(newhigh_sig.iloc[i])
 
             if signal and trend_filter:
                 if pd.isna(sma[100].iloc[i]):
@@ -597,7 +615,12 @@ def backtest_ticker(
             )
             target_hit = pnl_pct >= profit_target_pct
             sl_hit = pnl_pct <= -stop_loss_pct
-            if exit_mode == "ppp_break":
+            if exit_mode == "ppp_or_sl":
+                # 片山晃の新高値ブレイク投資に対応する手仕舞い。
+                # 「上昇が続く間は持ち続け、買値から8%下がったら損切り」なので
+                # 保有期限を置かず、トレンドが崩れるか損切り水準に触れるまで持つ
+                should_exit = ppp_break_hit or sl_hit
+            elif exit_mode == "ppp_break":
                 should_exit = ppp_break_hit
             elif exit_mode == "atr_trail":
                 should_exit = atr_hit
@@ -667,6 +690,7 @@ def parse_config(args) -> dict:
         "timeanddev": "time_and_dev", "pportimeordev": "ppp_or_time_or_dev",
         "target": "profit_target", "pportarget": "ppp_or_target",
         "timesl": "time_or_sl", "timedevsl": "time_dev_sl",
+        "pppsl": "ppp_or_sl",
     }
     exit_mode = exit_mode_map.get(arg1, "ma")
     exit_period = 20 if exit_mode != "ma" else int(arg1)
@@ -693,9 +717,12 @@ def parse_config(args) -> dict:
     # 複数指定すると「どれか点灯で買い」になる（例: either macd）
     entry_parts = [
         a for a in rest
-        if a in ("kahanshin", "pullback", "either", "ichimoku", "macd", "bandwalk")
+        if a in ("kahanshin", "pullback", "either", "ichimoku", "macd", "bandwalk", "newhigh")
     ]
     entry_mode = "+".join(entry_parts) if entry_parts else "kahanshin"
+    # 新高値の判定期間は "nh250"（=52週・既定）"nh500"（=約2年）のように指定できる
+    nh_args = [a for a in rest if a.startswith("nh") and a[2:].isdigit()]
+    new_high_period = int(nh_args[0][2:]) if nh_args else 250
     # 往復の取引コスト（手数料＋スリッページ）。"cost20" で0.20%を意味する
     # （既定は0＝コスト無視。過去の検証結果と数値を比較できるようにするため）
     cost_args = [a for a in rest if a.startswith("cost") and a[4:].isdigit()]
@@ -742,12 +769,14 @@ def parse_config(args) -> dict:
         "ppp_or_time_or_dev": "PPP崩れ or タイムストップ60日 or 乖離20%の最も早いもの",
         "profit_target": "含み益が10%に達したら利確（固定利確目標・損切りなし）",
         "ppp_or_target": "PPP崩れ or 固定利確目標10%の早い方",
+        "ppp_or_sl": f"PPP崩れ or 損切り-{stop_loss_pct:.0f}%（保有期限なし＝片山流）",
         "time_or_sl": f"タイムストップ{time_stop_days}日 or 損切り-{stop_loss_pct:.0f}%の早い方",
         "time_dev_sl": f"タイムストップ{time_stop_days}日 or 乖離20%利確 or 損切り-{stop_loss_pct:.0f}%の最も早いもの",
     }.get(exit_mode, f"{exit_period}日線割れ")
     _names = {
         "kahanshin": "下半身", "pullback": "押し目買い", "either": "下半身/押し目買い",
         "ichimoku": "一目三役好転", "macd": "MACD GC", "bandwalk": "バンドウォーク",
+        "newhigh": "新高値ブレイク",
     }
     entry_desc = ("【空売り】" if side == "short" else "") + " or ".join(_names.get(p, p) for p in entry_mode.split("+"))
 
@@ -759,6 +788,7 @@ def parse_config(args) -> dict:
         "use_sector_filter": use_sector_filter, "use_rsi_filter": use_rsi_filter,
         "use_dev_filter": use_dev_filter, "use_candle_filter": use_candle_filter,
         "use_fib_filter": use_fib_filter, "stop_loss_pct": stop_loss_pct,
+        "new_high_period": new_high_period,
         "time_stop_days": time_stop_days, "entry_mode": entry_mode, "cost_pct": cost_pct,
         "side": side, "history_period": history_period,
         "filter_desc": filter_desc, "exit_desc": exit_desc, "entry_desc": entry_desc,
@@ -795,6 +825,7 @@ def run_backtest(cfg: dict, hist_map: dict, name_map: dict, market_regime=None,
                 candle_filter=cfg["use_candle_filter"], fib_filter=cfg["use_fib_filter"],
                 stop_loss_pct=cfg["stop_loss_pct"], time_stop_days=cfg["time_stop_days"],
                 entry_mode=cfg["entry_mode"], cost_pct=cfg["cost_pct"], side=cfg["side"],
+                new_high_period=cfg.get("new_high_period", 250),
             )
             all_trades.extend(trades)
             bh_returns.append(buy_and_hold_return(hist))
@@ -945,6 +976,7 @@ def main():
         "dev_exit": "devexit", "ppp_or_dev": "ppordev",
         "time_and_dev": "timeanddev", "ppp_or_time_or_dev": "pportimeordev",
         "profit_target": "target", "ppp_or_target": "pportarget",
+        "ppp_or_sl": f"pppsl{stop_loss_pct:.0f}",
         "time_or_sl": f"timesl{stop_loss_pct:.0f}d{time_stop_days}",
         "time_dev_sl": f"timedevsl{stop_loss_pct:.0f}d{time_stop_days}",
     }.get(exit_mode, f"exit{exit_period}")
