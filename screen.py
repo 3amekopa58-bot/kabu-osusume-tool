@@ -72,6 +72,14 @@ KATAYAMA_TESTED = {
     "min_roe": None, "max_per": 20.0,
 }
 EDINET_FINANCIALS_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
+# 片山晃 PART 7 のOKポイント①②「上場から5年以内／10年以内」の判定用。
+# 成長余地（伸びしろ）が大きく残っている会社を見分ける指標として使う。
+# ⚠️ NGポイント②「上場5年以内に下方修正2回以上」は**実装していない**。
+# 下方修正の履歴はTDnetの適時開示にしかなく、TDnetは直近1か月ぶんしか
+# 公開していない（2026-08-30に実測。1年前の日付は404）。上場年数だけで
+# 除外すると著者の意図（下方修正を連発する会社を避ける）と別物になるため、
+# 片方だけの実装はしない
+LISTING_DATES_PATH = BASE_DIR / "data" / "listing_dates.json"
 OUTPUT_DIR = BASE_DIR / "output"
 EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
 
@@ -782,6 +790,16 @@ def technical_score(row, market_regime_up: bool = True) -> float:
     return score
 
 
+def _as_number(series: pd.Series) -> pd.Series:
+    """
+    数値として扱うべき列を確実に数値にする。yfinanceのinfoは銘柄によって
+    同じ項目を文字列で返すことがあり、混ざると rank() が
+    「'<' not supported between instances of 'str' and 'float'」で落ちる
+    （2026-08-30にPER列で実際に発生）。数値にできない値はNaN＝欠損扱い。
+    """
+    return pd.to_numeric(series, errors="coerce")
+
+
 def rank_score(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
     """
     パーセンタイル順位を0〜1のスコアに変換する。
@@ -790,7 +808,7 @@ def rank_score(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
     使うと「データが無い銘柄が満点になる」という誤った結果になることがあった。
     2026-08-18に発見・修正。）
     """
-    pct = series.rank(pct=True, na_option="keep")
+    pct = _as_number(series).rank(pct=True, na_option="keep")
     if not higher_is_better:
         pct = 1 - pct
     return pct.fillna(0.5)
@@ -837,8 +855,44 @@ def load_growth() -> dict:
     return out
 
 
+def load_listing_years() -> dict:
+    """
+    銘柄ごとの上場からの年数を返す（通信不要）。
+    2001年以前から上場している銘柄は yfinance のデータ開始日しか分からないため
+    None を返す（「上場から25年」などと誤解しないように）。
+    """
+    if not LISTING_DATES_PATH.exists():
+        return {}
+    data = json.loads(LISTING_DATES_PATH.read_text(encoding="utf-8"))["data"]
+    today = dt.date.today()
+    out = {}
+    for code, r in data.items():
+        if r.get("old_listing"):
+            out[code] = None
+            continue
+        try:
+            d = dt.date.fromisoformat(r["first_trade_date"])
+        except (ValueError, KeyError):
+            continue
+        out[code] = round((today - d).days / 365.25, 1)
+    return out
+
+
 def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool = True) -> pd.DataFrame:
     df = pd.DataFrame(rows)
+
+    # yfinanceのinfoは銘柄によって同じ項目を文字列で返すことがある。
+    # 個別に直すと必ず漏れるので、数値として扱う列は入口でまとめて変換する
+    # （2026-08-30、PER列の文字列混入で rank() が落ちた。その修正後も
+    #  graham_number = per × pbr の pbr で同じ型エラーが再発した）
+    for col in ("price", "per", "pbr", "dividend_yield", "current_ratio",
+                "debt_to_equity", "securities_valuation_diff_change_yen",
+                "revenue_growth", "profit_growth", "roe", "years_since_listing",
+                "rsi14", "volume_ratio", "dev_from_sma25_pct", "ppp_matches",
+                "td_buy", "td_sell", "last_close", "last_open",
+                "sma5", "sma10", "sma20", "sma50", "sma100"):
+        if col in df.columns:
+            df[col] = _as_number(df[col])
 
     df["lot_cost"] = df["price"] * LOT_SIZE
     df["affordable"] = df["lot_cost"] <= budget
@@ -949,7 +1003,9 @@ def main():
     # 圏外の銘柄は総合スコアで上位に来る余地がないため、実質の損失はない。
     # 決算データ（通信不要）を各行に載せる。片山流の判定に使う
     growth = load_growth()
+    listing_years = load_listing_years()
     for r in rows:
+        r["years_since_listing"] = listing_years.get(r["code"])
         g = growth.get(r["code"], {})
         r["revenue_growth"] = g.get("revenue_growth")
         r["profit_growth"] = g.get("profit_growth")
@@ -1035,7 +1091,7 @@ def main():
         "kahanshin", "pullback",
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
-        "new_high", "revenue_growth", "profit_growth", "roe",
+        "new_high", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",

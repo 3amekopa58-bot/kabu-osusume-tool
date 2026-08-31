@@ -5,6 +5,7 @@ ntfy.sh 経由でプッシュ通知する。CSVが無い（screen.pyが失敗し
 エラー通知を送る。
 """
 
+import datetime as dt
 import glob
 import json
 import os
@@ -207,11 +208,18 @@ def format_katayama_pick(r, names: dict) -> str:
 
     roe = r.get("roe")
     roe_txt = f" / ROE{float(roe):.0f}%" if roe is not None and roe == roe else ""
+    # 片山晃 PART 7 のOKポイント①②。上場から5年/10年以内は成長余地が大きい
+    yrs = r.get("years_since_listing")
+    if yrs is not None and yrs == yrs:
+        mark = "★" if float(yrs) <= 5 else ("☆" if float(yrs) <= 10 else "")
+        listing_txt = f"\n  上場から{float(yrs):.1f}年{mark}"
+    else:
+        listing_txt = ""
     return (
         f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
-        f" / PER{float(r['per']):.1f}倍{roe_txt}\n"
+        f" / PER{float(r['per']):.1f}倍{roe_txt}{listing_txt}\n"
         f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
         f"  利確目標なし・期限なし（上昇が続く限り持つ）"
     )
@@ -238,6 +246,16 @@ def build_message() -> str:
     files = sorted(glob.glob("output/recommend_*.csv"))
     if not files:
         return "株おすすめツール: 本日はスクリーニングに失敗し、結果を取得できませんでした"
+
+    # ⚠️ ワークフローは notify を if:always() で呼ぶので、screen.py が落ちた日でも
+    # ここが動く。日付を確認しないと**前日の推奨が今日のものとして届く**。
+    # 2026-08-30、screen.py がPER列の型エラーで落ちた際に実際にそうなった
+    latest = Path(files[-1]).stem.replace("recommend_", "")
+    today = dt.date.today().strftime("%Y%m%d")
+    if latest != today:
+        return ("⚠️ 株おすすめツール: 本日のスクリーニングが完了していません。\n"
+                f"最新の結果は {latest[:4]}-{latest[4:6]}-{latest[6:]} 時点のものです。\n"
+                "古い推奨で売買しないでください。GitHub Actionsのログを確認してください。")
 
     import pandas as pd
 
@@ -291,7 +309,8 @@ def build_message() -> str:
     if any_kata:
         parts.append(
             "　※片山流は現行ルールより当たり外れが大きい（2018/2021/2022年は負け越し）。"
-            "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中"
+            "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中。"
+            "★=上場5年以内 ☆=10年以内（伸びしろが大きい）"
         )
 
     footer = (
