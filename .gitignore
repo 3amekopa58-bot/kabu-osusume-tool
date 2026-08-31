@@ -5,3 +5,4 @@ output/
 *.log
 .env
 data/price_cache/
+data/.jquants_token.json
