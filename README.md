@@ -185,6 +185,7 @@ ntfy.sh でプッシュ通知する（トピック名はGitHub Secretsの`NTFY_T
 | `scripts/build_fundamental_history.py` | 過去の決算データをyfinanceから集める（5期分） |
 | `scripts/build_edinet_financials.py` | 決算データをEDINETから集める（2013年〜・14期分） |
 | `scripts/build_listing_dates.py` | 上場日を集める（上場5年/10年以内の判定用） |
+| `scripts/jquants.py` | J-Quants API（JPX公式）。会社予想の下方修正回数を数える |
 | `scripts/adjust_edinet_split.py` | EDINETのBPS/EPSを株価と同じ分割調整基準に揃える |
 | `price_cache.py` | 株価のローカルキャッシュ（他スクリプトから使う） |
 | `portfolio_sim.py` | 予算・コスト・税金を入れた現実的な資産推移の検証 |

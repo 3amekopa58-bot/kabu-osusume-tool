@@ -17,6 +17,7 @@ tickers.csv に書かれた銘柄について、
 import csv
 import datetime as dt
 import json
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -80,6 +81,14 @@ EDINET_FINANCIALS_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
 # 除外すると著者の意図（下方修正を連発する会社を避ける）と別物になるため、
 # 片方だけの実装はしない
 LISTING_DATES_PATH = BASE_DIR / "data" / "listing_dates.json"
+
+# 片山晃 PART 7 のNGポイント②「下方修正を連発する会社は避ける」。
+# J-Quants（JPX公式）の財務サマリーから会社予想の推移を追って数える。
+# ⚠️ 無料プランはAPIコール5件/分なので、944銘柄すべてには回せない
+# （3.4時間かかる）。**片山流の候補になり得る銘柄だけ**に絞って呼ぶ。
+# 下方修正のチェックが要るのは片山流の判定だけなので、これで足りる。
+KATAYAMA_MAX_DOWNWARD_REVISIONS = 2   # これ以上なら除外（書籍は「上場5年以内に2回以上」）
+JQUANTS_MAX_LOOKUPS = 12              # 1回の実行でJ-Quantsに問い合わせる上限
 OUTPUT_DIR = BASE_DIR / "output"
 EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
 
@@ -878,6 +887,33 @@ def load_listing_years() -> dict:
     return out
 
 
+def fetch_downward_revisions(codes: list) -> dict:
+    """
+    J-Quants から会社予想の下方修正回数を引く（片山流の候補だけに使う）。
+    APIキーが無い・APIが落ちている場合は静かに空を返す＝除外しない。
+    ここで落ちて推奨全体が出せなくなるほうが困るため。
+    """
+    if not codes:
+        return {}
+    try:
+        sys.path.insert(0, str(BASE_DIR / "scripts"))
+        from jquants import JQuantsClient, count_downward_revisions
+        cli = JQuantsClient()
+    except Exception as e:
+        print(f"  J-Quantsを使えないので下方修正のチェックは省略します: {e}")
+        return {}
+
+    out = {}
+    print(f"  片山流の候補{len(codes)}銘柄について下方修正を確認します"
+          f"（J-Quants・1銘柄13秒）…")
+    for code in codes:
+        try:
+            out[code] = count_downward_revisions(cli.summary(code))["down"]
+        except Exception as e:
+            print(f"    {code}: 取得失敗のためチェックせず通す ({str(e)[:60]})")
+    return out
+
+
 def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool = True) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
@@ -954,6 +990,21 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["katayama_book"] = _match(KATAYAMA_BOOK)
     pool["katayama_tested"] = _match(KATAYAMA_TESTED)
     pool["katayama"] = pool["katayama_book"] | pool["katayama_tested"]
+
+    # NGポイント②：下方修正を繰り返す会社を外す。候補にだけJ-Quantsを引く
+    pool["downward_revisions"] = None
+    cand = pool.index[pool["katayama"]].tolist()[:JQUANTS_MAX_LOOKUPS]
+    if cand:
+        revisions = fetch_downward_revisions(
+            [str(pool.at[i, "code"]) for i in cand])
+        for i in cand:
+            n = revisions.get(str(pool.at[i, "code"]))
+            pool.at[i, "downward_revisions"] = n
+            if n is not None and n >= KATAYAMA_MAX_DOWNWARD_REVISIONS:
+                # 下方修正が多い会社は片山流の対象から外す（NGポイント②）
+                pool.at[i, "katayama_book"] = False
+                pool.at[i, "katayama_tested"] = False
+                pool.at[i, "katayama"] = False
 
     pool["total_score"] = (
         pool["fundamental_score"] * FUNDAMENTAL_WEIGHT
@@ -1092,7 +1143,7 @@ def main():
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
         "new_high", "revenue_growth", "profit_growth", "roe", "years_since_listing",
-        "katayama", "katayama_book", "katayama_tested",
+        "katayama", "katayama_book", "katayama_tested", "downward_revisions",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
