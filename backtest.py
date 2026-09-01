@@ -298,6 +298,12 @@ CWH_HANDLE_MIN_LEN = 5     # ハンドルの長さ 1週〜
 CWH_HANDLE_MAX_LEN = 25    # 〜5週（「短い調整」）
 CWH_HANDLE_MIN_DEPTH = 0.03  # 調整がまったく無いものは除く
 CWH_HANDLE_MAX_DEPTH = 0.15  # ハンドルは浅い（深いとカップの作り直し）
+# 「カップ完成後の押し目」を見るための遡り日数。押し目買いエントリーは
+# 新高値の日そのものではないので、直近この日数以内にカップが完成していれば
+# 「カップ後の押し目」とみなす。
+# ⚠️ 60日は既存のタイムストップ（保有60日）に合わせて**先に決め打ちした値**。
+# 成績を見ながら動かしていない（動かすと探索になり検証の意味が無くなる）
+CWH_RECENT_LOOKBACK = 60
 
 
 def calc_cup_with_handle(close: pd.Series, period: int = 250) -> pd.Series:
@@ -417,6 +423,7 @@ def backtest_ticker(
     rsi_threshold: float = 70.0,
     dev_filter: bool = False,
     cwh_filter: bool = False,
+    cwh_recent_filter: bool = False,
     dev_threshold: float = 20.0,
     dev_ma_period: int = 25,
     exit_dev_threshold: float = 20.0,
@@ -521,6 +528,10 @@ def backtest_ticker(
     bandwalk_sig = calc_bandwalk_start(close) if "bandwalk" in entry_mode else None
     newhigh_sig = calc_new_high_break(close, new_high_period) if "newhigh" in entry_mode else None
     cwh_sig = calc_cup_with_handle(close, new_high_period) if cwh_filter else None
+    # 直近CWH_RECENT_LOOKBACK日以内にカップが完成したか（カップ後の押し目用）
+    cwh_recent_sig = (calc_cup_with_handle(close, new_high_period)
+                      .rolling(CWH_RECENT_LOOKBACK, min_periods=1).max().astype(bool)
+                      if cwh_recent_filter else None)
     fib_retracement = calc_fib_retracement_pct(close) if fib_filter else None
 
     ma_periods = (5, 10, 20, 50, 100)
@@ -653,6 +664,10 @@ def backtest_ticker(
             if signal and cwh_filter and not bool(cwh_sig.iloc[i]):
                 signal = False
 
+            # カップ完成後60日以内の押し目だけに絞る
+            if signal and cwh_recent_filter and not bool(cwh_recent_sig.iloc[i]):
+                signal = False
+
             if signal and dev_filter:
                 if pd.isna(sma_dev.iloc[i]) or sma_dev.iloc[i] == 0:
                     signal = False
@@ -782,6 +797,7 @@ def parse_config(args) -> dict:
     use_rsi_filter = "rsi" in rest
     use_dev_filter = "dev" in rest
     use_cwh_filter = "cwh" in rest
+    use_cwh_recent_filter = "cwhrecent" in rest
     use_candle_filter = "candle" in rest
     use_fib_filter = "fib" in rest
     # 損切り幅は "sl10" / "sl15" のような引数で上書きできる（既定は10%）
@@ -829,6 +845,8 @@ def parse_config(args) -> dict:
         filter_desc += "+RSI(14日)が70未満（買われすぎ回避）"
     if use_cwh_filter:
         filter_desc += "+カップ・ウィズ・ハンドルの形が完成した新高値のみ"
+    if use_cwh_recent_filter:
+        filter_desc += f"+直近{CWH_RECENT_LOOKBACK}日以内にカップ・ウィズ・ハンドルが完成"
     if use_dev_filter:
         filter_desc += "+株価が25日線から20%未満の上方乖離（追いかけ買い回避）"
     if use_candle_filter:
@@ -867,6 +885,7 @@ def parse_config(args) -> dict:
         "use_rs_filter": use_rs_filter, "use_earnings_filter": use_earnings_filter,
         "use_sector_filter": use_sector_filter, "use_rsi_filter": use_rsi_filter,
         "use_dev_filter": use_dev_filter, "use_cwh_filter": use_cwh_filter,
+        "use_cwh_recent_filter": use_cwh_recent_filter,
         "use_candle_filter": use_candle_filter,
         "use_fib_filter": use_fib_filter, "stop_loss_pct": stop_loss_pct,
         "new_high_period": new_high_period,
@@ -904,6 +923,7 @@ def run_backtest(cfg: dict, hist_map: dict, name_map: dict, market_regime=None,
                 earnings_dates=earnings_dates, sector_regime=sector_regime,
                 rsi_filter=cfg["use_rsi_filter"], dev_filter=cfg["use_dev_filter"],
                 cwh_filter=cfg["use_cwh_filter"],
+                cwh_recent_filter=cfg["use_cwh_recent_filter"],
                 candle_filter=cfg["use_candle_filter"], fib_filter=cfg["use_fib_filter"],
                 stop_loss_pct=cfg["stop_loss_pct"], time_stop_days=cfg["time_stop_days"],
                 entry_mode=cfg["entry_mode"], cost_pct=cfg["cost_pct"], side=cfg["side"],
@@ -985,6 +1005,7 @@ def main():
     use_rsi_filter = cfg["use_rsi_filter"]
     use_dev_filter = cfg["use_dev_filter"]
     use_cwh_filter = cfg["use_cwh_filter"]
+    use_cwh_recent_filter = cfg["use_cwh_recent_filter"]
     use_candle_filter = cfg["use_candle_filter"]
     use_fib_filter = cfg["use_fib_filter"]
     stop_loss_pct = cfg["stop_loss_pct"]
@@ -1052,7 +1073,7 @@ def main():
         market_suffix = ""
     # side を必ずファイル名に含める（含めないと空売りの結果が買いの結果を
     # 上書きしてしまう。2026-08-29に実際に上書き事故を起こしたため明示）
-    suffix = ("_short" if side == "short" else "") + (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_cwh" if use_cwh_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
+    suffix = ("_short" if side == "short" else "") + (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_cwh" if use_cwh_filter else "") + ("_cwhrecent" if use_cwh_recent_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",
