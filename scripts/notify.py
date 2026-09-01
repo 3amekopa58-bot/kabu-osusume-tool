@@ -216,6 +216,9 @@ def format_katayama_pick(r, names: dict) -> str:
 
     roe = r.get("roe")
     roe_txt = f" / ROE{float(roe):.0f}%" if roe is not None and roe == roe else ""
+    # カップ・ウィズ・ハンドル。この形が完成した新高値は成績が良い
+    # （重複しない3期間すべてでPF改善／REQUIREMENTS 4.4-17）
+    cwh_txt = "【カップ】" if bool(r.get("cup_with_handle")) else ""
     # 片山晃 PART 7 のOKポイント①②。上場から5年/10年以内は成長余地が大きい
     yrs = r.get("years_since_listing")
     if yrs is not None and yrs == yrs:
@@ -224,7 +227,7 @@ def format_katayama_pick(r, names: dict) -> str:
     else:
         listing_txt = ""
     return (
-        f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]\n"
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]{cwh_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
         f" / PER{float(r['per']):.1f}倍{roe_txt}{listing_txt}\n"
@@ -319,7 +322,9 @@ def build_message() -> str:
             "　※片山流は現行ルールより当たり外れが大きい（2018/2021/2022年は負け越し）。"
             "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中。"
             "長期版は増益を見ない代わりに長期保有が前提（短期で切るなら書籍版/検証版）。"
-            "★=上場5年以内 ☆=10年以内（伸びしろが大きい）"
+            "★=上場5年以内 ☆=10年以内（伸びしろが大きい）。"
+            "【カップ】=カップ・ウィズ・ハンドル完成（この形の新高値は"
+            "重複しない3期間すべてでPFが改善＝優先度が高い）"
         )
 
     footer = (

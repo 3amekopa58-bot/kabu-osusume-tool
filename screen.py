@@ -26,6 +26,7 @@ from typing import Optional
 import pandas as pd
 import yfinance as yf
 
+from backtest import calc_cup_with_handle
 from price_cache import fetch_histories, fetch_history
 
 BASE_DIR = Path(__file__).parent
@@ -585,6 +586,14 @@ def fetch_one(code: str, name: str, edinet_cache: Optional[dict] = None,
         else:
             row["new_high"] = False
             row["new_high_ref"] = None
+
+        # カップ・ウィズ・ハンドル（片山晃_ルール.md PART 4 補足／原典はオニール）。
+        # 新高値のうちこの形が完成しているものは、重複しない3期間すべてで
+        # PFが改善した（REQUIREMENTS 4.4-17）。件数が6分の1に減るので
+        # 必須条件にはせず、印として付けて優先順位の判断に使う
+        row["cup_with_handle"] = bool(
+            row["new_high"] and calc_cup_with_handle(close, NEW_HIGH_PERIOD).iloc[-1]
+        )
 
         row["pullback"] = bool(
             pd.notna(sma20_now)
@@ -1161,7 +1170,7 @@ def main():
         "kahanshin", "pullback",
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
-        "new_high", "revenue_growth", "profit_growth", "roe", "years_since_listing",
+        "new_high", "cup_with_handle", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested", "katayama_long",
         "downward_revisions",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
