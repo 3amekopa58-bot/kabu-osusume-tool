@@ -136,6 +136,71 @@ def count_downward_revisions(rows: list, key: str = "FOP") -> dict:
     return {"down": down, "up": up, "periods": len(by_period), "detail": detail}
 
 
+_ORDER = {"1Q": 1, "2Q": 2, "3Q": 3, "FY": 4}
+
+
+def quarterly_revenue_growth(rows: list) -> dict:
+    """
+    直近の四半期決算の「前年同期比 増収率」を返す。
+
+    片山晃『5年で1億貯める株式投資』PART 6 は
+    **「四半期決算ごとに前年同期比『売上高10%増』が目安」**と書いている。
+    このツールが持っているEDINETの決算データは**有価証券報告書＝年次**なので
+    年次の増収率しか出せない。四半期の前年同期比はここで補う。
+
+    J-Quantsの `Sales` は**期首からの累計**（1Q→2Q→3Q→FYと積み上がる）。
+    そこで2通りを出す：
+      cumulative … 累計どうしの前年同期比（日本の決算発表の「前年同期比」）
+      standalone … その四半期"単独"の前年同期比
+                   （累計の差分。直近3か月の勢いが出るので、
+                     累計では見えない失速・加速が分かる）
+
+    戻り値: {"cumulative": %, "standalone": % or None, "period": "3Q",
+             "cur_fy": ..., "prev_fy": ...} / 比較できなければ None
+    """
+    # {決算期: {四半期種別: 累計売上}}
+    by_fy = {}
+    for r in rows:
+        t, fy = r.get("CurPerType"), r.get("CurFYEn")
+        v = _num(r.get("Sales"))
+        if not t or not fy or v is None:
+            continue
+        by_fy.setdefault(fy, {})[t] = v
+
+    fys = sorted(by_fy)
+    if len(fys) < 2:
+        return None
+    cur_fy, prev_fy = fys[-1], fys[-2]
+    cur, prev = by_fy[cur_fy], by_fy[prev_fy]
+
+    # 当期でいちばん進んだ四半期のうち、前年にも同じものがあるものを使う
+    common = [t for t in cur if t in prev]
+    if not common:
+        return None
+    t = max(common, key=lambda x: _ORDER.get(x, 0))
+    if not prev[t] or prev[t] <= 0:
+        return None
+
+    def standalone(d, kind):
+        """累計から1つ前の四半期の累計を引いて、その四半期単独の売上を出す"""
+        order = _ORDER.get(kind, 0)
+        if order <= 1:
+            return d.get(kind)          # 1Qは累計＝単独
+        pre = next((k for k, o in sorted(_ORDER.items(), key=lambda kv: -kv[1])
+                    if o == order - 1 and k in d), None)
+        if pre is None or d.get(kind) is None:
+            return None
+        return d[kind] - d[pre]
+
+    sa_cur, sa_prev = standalone(cur, t), standalone(prev, t)
+    sa = ((sa_cur - sa_prev) / sa_prev * 100
+          if sa_cur is not None and sa_prev and sa_prev > 0 else None)
+
+    return {"cumulative": (cur[t] - prev[t]) / prev[t] * 100,
+            "standalone": sa, "period": t,
+            "cur_fy": cur_fy, "prev_fy": prev_fy}
+
+
 if __name__ == "__main__":
     import sys
     code = sys.argv[1] if len(sys.argv) > 1 else "6750"

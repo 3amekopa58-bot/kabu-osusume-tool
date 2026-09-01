@@ -226,11 +226,26 @@ def format_katayama_pick(r, names: dict) -> str:
         listing_txt = f"\n  上場から{float(yrs):.1f}年{mark}"
     else:
         listing_txt = ""
+
+    # 四半期の前年同期比（PART 6「四半期決算ごとに前年同期比 売上高10%増が目安」）。
+    # このツールのEDINETデータは年次なので、J-Quantsで補った値を併記する。
+    # ⚠️ 年次の条件（検証済み）を置き換えるものではなく、追加情報として出す。
+    # 累計が10%を超えていても直近の四半期単独で失速していれば分かるようにする
+    q_cum, q_sa, q_per = (r.get("q_revenue_growth"), r.get("q_revenue_growth_sa"),
+                          r.get("q_period"))
+    q_txt = ""
+    if q_cum is not None and q_cum == q_cum:
+        sa = f"／直近四半期単独{pct(q_sa)}" if (q_sa is not None and q_sa == q_sa) else ""
+        warn = ""
+        if q_sa is not None and q_sa == q_sa and float(q_cum) >= 10 > float(q_sa):
+            warn = " ⚠️失速"
+        q_txt = f"\n  {q_per or '四半期'}累計 増収{pct(q_cum)}{sa}{warn}"
+
     return (
         f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]{cwh_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
-        f" / PER{float(r['per']):.1f}倍{roe_txt}{listing_txt}\n"
+        f" / PER{float(r['per']):.1f}倍{roe_txt}{q_txt}{listing_txt}\n"
         f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
         f"  利確目標なし・期限なし（上昇が続く限り持つ）"
     )
@@ -324,7 +339,9 @@ def build_message() -> str:
             "長期版は増益を見ない代わりに長期保有が前提（短期で切るなら書籍版/検証版）。"
             "★=上場5年以内 ☆=10年以内（伸びしろが大きい）。"
             "【カップ】=カップ・ウィズ・ハンドル完成（この形の新高値は"
-            "重複しない3期間すべてでPFが改善＝優先度が高い）"
+            "重複しない3期間すべてでPFが改善＝優先度が高い）。"
+            "増収率は年次（検証済みの条件）。四半期の前年同期比は著者が"
+            "本来見ている粒度で、参考情報として併記している"
         )
 
     footer = (

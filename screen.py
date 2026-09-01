@@ -910,9 +910,17 @@ def load_listing_years() -> dict:
     return out
 
 
-def fetch_downward_revisions(codes: list) -> dict:
+def fetch_jquants_facts(codes: list) -> dict:
     """
-    J-Quants から会社予想の下方修正回数を引く（片山流の候補だけに使う）。
+    J-Quants から片山流の候補について2つを引く（1銘柄1コールで両方まかなう）。
+
+      down    … 会社予想の下方修正回数（PART 7 NGポイント②）
+      quarter … 直近四半期の前年同期比 増収率（PART 6「四半期ごとに10%増」）
+
+    このツールのEDINETデータは**有価証券報告書＝年次**なので、四半期の
+    前年同期比は年次からは出せない。同じ `summary()` の応答に四半期累計の
+    売上（Sales）が入っているので、**APIコールを増やさずに**両方を得る。
+
     APIキーが無い・APIが落ちている場合は静かに空を返す＝除外しない。
     ここで落ちて推奨全体が出せなくなるほうが困るため。
     """
@@ -920,18 +928,23 @@ def fetch_downward_revisions(codes: list) -> dict:
         return {}
     try:
         sys.path.insert(0, str(BASE_DIR / "scripts"))
-        from jquants import JQuantsClient, count_downward_revisions
+        from jquants import (JQuantsClient, count_downward_revisions,
+                             quarterly_revenue_growth)
         cli = JQuantsClient()
     except Exception as e:
-        print(f"  J-Quantsを使えないので下方修正のチェックは省略します: {e}")
+        print(f"  J-Quantsを使えないので下方修正と四半期増収率は省略します: {e}")
         return {}
 
     out = {}
-    print(f"  片山流の候補{len(codes)}銘柄について下方修正を確認します"
-          f"（J-Quants・1銘柄13秒）…")
+    print(f"  片山流の候補{len(codes)}銘柄をJ-Quantsで確認します"
+          f"（下方修正＋四半期の前年同期比・1銘柄13秒）…")
     for code in codes:
         try:
-            out[code] = count_downward_revisions(cli.summary(code))["down"]
+            rows = cli.summary(code)
+            out[code] = {
+                "down": count_downward_revisions(rows)["down"],
+                "quarter": quarterly_revenue_growth(rows),
+            }
         except Exception as e:
             print(f"    {code}: 取得失敗のためチェックせず通す ({str(e)[:60]})")
     return out
@@ -1020,12 +1033,19 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
 
     # NGポイント②：下方修正を繰り返す会社を外す。候補にだけJ-Quantsを引く
     pool["downward_revisions"] = None
+    pool["q_revenue_growth"] = None       # 四半期累計の前年同期比
+    pool["q_revenue_growth_sa"] = None    # その四半期"単独"の前年同期比
+    pool["q_period"] = None
     cand = pool.index[pool["katayama"]].tolist()[:JQUANTS_MAX_LOOKUPS]
     if cand:
-        revisions = fetch_downward_revisions(
-            [str(pool.at[i, "code"]) for i in cand])
+        facts = fetch_jquants_facts([str(pool.at[i, "code"]) for i in cand])
         for i in cand:
-            n = revisions.get(str(pool.at[i, "code"]))
+            f = facts.get(str(pool.at[i, "code"])) or {}
+            q = f.get("quarter") or {}
+            pool.at[i, "q_revenue_growth"] = q.get("cumulative")
+            pool.at[i, "q_revenue_growth_sa"] = q.get("standalone")
+            pool.at[i, "q_period"] = q.get("period")
+            n = f.get("down")
             pool.at[i, "downward_revisions"] = n
             if n is not None and n >= KATAYAMA_MAX_DOWNWARD_REVISIONS:
                 # 下方修正が多い会社は片山流の対象から外す（NGポイント②）
@@ -1172,7 +1192,8 @@ def main():
         "conditions_met", "conditions_all",
         "new_high", "cup_with_handle", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested", "katayama_long",
-        "downward_revisions",
+        "downward_revisions", "q_revenue_growth", "q_revenue_growth_sa",
+        "q_period",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",
