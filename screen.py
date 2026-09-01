@@ -72,6 +72,20 @@ KATAYAMA_TESTED = {
     "label": "検証版", "min_rev": 10.0, "min_profit": 30.0,
     "min_roe": None, "max_per": 20.0,
 }
+# 長期版：PART 6「中小型株の中長期投資」の条件。著者は「利益は伸びるのも
+# 落ち込むのもどちらもOK」「増収減益はむしろ先行投資のチャンス」と書いており、
+# 売上高の伸びだけを見る。増益を要求しない点が上の2つと決定的に違う。
+#
+# ⚠️ **長期保有が前提**。上の2つ（短期のエグジット＝PPP崩れ or -8%、平均保有
+# 30日）では増益条件を付けたほうが明確に良い。逆に500日フォワードリターンで
+# 見ると増収重視が全期間で最良になる（REQUIREMENTS 4.4-16）。
+# PER39倍以下（＝著者の「PER30倍台まで買い」）は3期間すべてで勝率が改善したので
+# 付ける。付けないとPER213倍・ROE0.3%のような銘柄が通ってしまい、PART 6 が
+# 前提にしている「成長余地のある会社」と別物になる
+KATAYAMA_LONG = {
+    "label": "長期版", "min_rev": 10.0, "min_profit": None,
+    "min_roe": None, "max_per": 39.0,
+}
 EDINET_FINANCIALS_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
 # 片山晃 PART 7 のOKポイント①②「上場から5年以内／10年以内」の判定用。
 # 成長余地（伸びしろ）が大きく残っている会社を見分ける指標として使う。
@@ -979,17 +993,21 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     nh = pool["new_high"].fillna(False).astype(bool)
 
     def _match(spec):
-        m = (nh
-             & (pool["profit_growth"].fillna(-999) >= spec["min_profit"])
-             & (pool["revenue_growth"].fillna(-999) >= spec["min_rev"])
-             & per.notna() & (per > 0) & (per <= spec["max_per"]))
+        m = nh & (pool["revenue_growth"].fillna(-999) >= spec["min_rev"])
+        # 長期版は増益を条件にしない（PART 6：利益は増えても減ってもOK）
+        if spec["min_profit"] is not None:
+            m &= pool["profit_growth"].fillna(-999) >= spec["min_profit"]
+        if spec["max_per"] is not None:
+            m &= per.notna() & (per > 0) & (per <= spec["max_per"])
         if spec["min_roe"] is not None:
             m &= pool["roe"].fillna(-999) >= spec["min_roe"]
         return m
 
     pool["katayama_book"] = _match(KATAYAMA_BOOK)
     pool["katayama_tested"] = _match(KATAYAMA_TESTED)
-    pool["katayama"] = pool["katayama_book"] | pool["katayama_tested"]
+    pool["katayama_long"] = _match(KATAYAMA_LONG)
+    pool["katayama"] = (pool["katayama_book"] | pool["katayama_tested"]
+                        | pool["katayama_long"])
 
     # NGポイント②：下方修正を繰り返す会社を外す。候補にだけJ-Quantsを引く
     pool["downward_revisions"] = None
@@ -1004,6 +1022,7 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
                 # 下方修正が多い会社は片山流の対象から外す（NGポイント②）
                 pool.at[i, "katayama_book"] = False
                 pool.at[i, "katayama_tested"] = False
+                pool.at[i, "katayama_long"] = False
                 pool.at[i, "katayama"] = False
 
     pool["total_score"] = (
@@ -1076,12 +1095,12 @@ def main():
     # 上位に来ないことが多い。圏外にいる候補も財務データの取得対象に加える
     # （加えないとPERが埋まらず、片山流の判定が常に不成立になる）
     picked = {id(r) for r in targets}
+    # 長期版は増益を条件にしないので、増収だけで拾う（利益で足切りしない）
+    _min_rev = min(v["min_rev"] for v in
+                   (KATAYAMA_BOOK, KATAYAMA_TESTED, KATAYAMA_LONG))
     extra = [r for r in rest
              if r.get("new_high")
-             and (r.get("profit_growth") or -999) >= min(KATAYAMA_BOOK["min_profit"],
-                                                        KATAYAMA_TESTED["min_profit"])
-             and (r.get("revenue_growth") or -999) >= min(KATAYAMA_BOOK["min_rev"],
-                                                         KATAYAMA_TESTED["min_rev"])
+             and (r.get("revenue_growth") or -999) >= _min_rev
              and id(r) not in picked]
     if extra:
         targets = targets + extra
@@ -1143,7 +1162,8 @@ def main():
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
         "new_high", "revenue_growth", "profit_growth", "roe", "years_since_listing",
-        "katayama", "katayama_book", "katayama_tested", "downward_revisions",
+        "katayama", "katayama_book", "katayama_tested", "katayama_long",
+        "downward_revisions",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",

@@ -91,6 +91,12 @@ KATAYAMA_VARIANTS = {
         "label": "検証版（増収10%↑・増益30%↑・PER20倍未満）",
         "stats": "14年576件で勝率51%・PF3.04・平均+4.8%",
     },
+    # PART 6「中小型株の中長期投資」。増益を条件にしないのが上2つとの違い。
+    # ⚠️ 長期保有が前提。短期で切ると増益条件を付けたほうが良い
+    "katayama_long": {
+        "label": "長期版（増収10%↑・利益不問・PER39倍以下／長期保有前提）",
+        "stats": "500日保有の検証で3期間すべて勝率最良（66/45/81%・平均+26/+13/+56%）",
+    },
 }
 
 
@@ -201,10 +207,12 @@ def format_katayama_pick(r, names: dict) -> str:
     stop_loss = cost * KATAYAMA_STOP_LOSS_PCT / 100
 
     def pct(v):
+        # NaN は float() を通ってしまうので明示的に弾く（"+nan%" と出るのを防ぐ）
         try:
-            return f"{float(v):+.0f}%"
+            f = float(v)
         except (TypeError, ValueError):
             return "?"
+        return "?" if f != f else f"{f:+.0f}%"
 
     roe = r.get("roe")
     roe_txt = f" / ROE{float(roe):.0f}%" if roe is not None and roe == roe else ""
@@ -310,6 +318,7 @@ def build_message() -> str:
         parts.append(
             "　※片山流は現行ルールより当たり外れが大きい（2018/2021/2022年は負け越し）。"
             "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中。"
+            "長期版は増益を見ない代わりに長期保有が前提（短期で切るなら書籍版/検証版）。"
             "★=上場5年以内 ☆=10年以内（伸びしろが大きい）"
         )
 
