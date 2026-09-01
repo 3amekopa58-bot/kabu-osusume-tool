@@ -914,8 +914,9 @@ def fetch_jquants_facts(codes: list) -> dict:
     """
     J-Quants から片山流の候補について2つを引く（1銘柄1コールで両方まかなう）。
 
-      down    … 会社予想の下方修正回数（PART 7 NGポイント②）
-      quarter … 直近四半期の前年同期比 増収率（PART 6「四半期ごとに10%増」）
+      down     … 会社予想の下方修正回数（PART 7 NGポイント②）
+      quarter  … 直近四半期の前年同期比 増収率（PART 6「四半期ごとに10%増」）
+      progress … 通期の会社予想に対する進捗率（PART 5。四半期25%ずつが目安）
 
     このツールのEDINETデータは**有価証券報告書＝年次**なので、四半期の
     前年同期比は年次からは出せない。同じ `summary()` の応答に四半期累計の
@@ -929,7 +930,7 @@ def fetch_jquants_facts(codes: list) -> dict:
     try:
         sys.path.insert(0, str(BASE_DIR / "scripts"))
         from jquants import (JQuantsClient, count_downward_revisions,
-                             quarterly_revenue_growth)
+                             progress_rate, quarterly_revenue_growth)
         cli = JQuantsClient()
     except Exception as e:
         print(f"  J-Quantsを使えないので下方修正と四半期増収率は省略します: {e}")
@@ -937,13 +938,14 @@ def fetch_jquants_facts(codes: list) -> dict:
 
     out = {}
     print(f"  片山流の候補{len(codes)}銘柄をJ-Quantsで確認します"
-          f"（下方修正＋四半期の前年同期比・1銘柄13秒）…")
+          f"（下方修正＋四半期の前年同期比＋進捗率・1銘柄13秒）…")
     for code in codes:
         try:
             rows = cli.summary(code)
             out[code] = {
                 "down": count_downward_revisions(rows)["down"],
                 "quarter": quarterly_revenue_growth(rows),
+                "progress": progress_rate(rows),
             }
         except Exception as e:
             print(f"    {code}: 取得失敗のためチェックせず通す ({str(e)[:60]})")
@@ -1036,6 +1038,11 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["q_revenue_growth"] = None       # 四半期累計の前年同期比
     pool["q_revenue_growth_sa"] = None    # その四半期"単独"の前年同期比
     pool["q_period"] = None
+    pool["progress_sales"] = None    # 通期予想に対する売上の進捗率
+    pool["progress_op"] = None       # 同・営業利益
+    pool["progress_expected"] = None # 目安（25%×四半期数）
+    # ⚠️ J-Quants無料プランは約4か月遅れなので、いつ時点の数字かを必ず持つ
+    pool["jq_disc_date"] = None
     cand = pool.index[pool["katayama"]].tolist()[:JQUANTS_MAX_LOOKUPS]
     if cand:
         facts = fetch_jquants_facts([str(pool.at[i, "code"]) for i in cand])
@@ -1045,6 +1052,12 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
             pool.at[i, "q_revenue_growth"] = q.get("cumulative")
             pool.at[i, "q_revenue_growth_sa"] = q.get("standalone")
             pool.at[i, "q_period"] = q.get("period")
+            pr = f.get("progress") or {}
+            pool.at[i, "progress_sales"] = pr.get("sales")
+            pool.at[i, "progress_op"] = pr.get("op")
+            pool.at[i, "progress_expected"] = pr.get("expected")
+            pool.at[i, "jq_disc_date"] = (pr.get("disc_date")
+                                          or q.get("disc_date"))
             n = f.get("down")
             pool.at[i, "downward_revisions"] = n
             if n is not None and n >= KATAYAMA_MAX_DOWNWARD_REVISIONS:
@@ -1193,7 +1206,7 @@ def main():
         "new_high", "cup_with_handle", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested", "katayama_long",
         "downward_revisions", "q_revenue_growth", "q_revenue_growth_sa",
-        "q_period",
+        "q_period", "progress_sales", "progress_op", "progress_expected", "jq_disc_date",
         "rsi14", "trend_label", "td_buy", "td_sell", "td_label", "kuchibashi_label",
         "monowakare_label", "fushime_label",
         "buy_timing", "sell_timing",

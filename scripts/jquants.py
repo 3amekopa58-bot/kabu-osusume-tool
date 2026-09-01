@@ -159,13 +159,14 @@ def quarterly_revenue_growth(rows: list) -> dict:
              "cur_fy": ..., "prev_fy": ...} / 比較できなければ None
     """
     # {決算期: {四半期種別: 累計売上}}
-    by_fy = {}
+    by_fy, disc = {}, {}
     for r in rows:
         t, fy = r.get("CurPerType"), r.get("CurFYEn")
         v = _num(r.get("Sales"))
         if not t or not fy or v is None:
             continue
         by_fy.setdefault(fy, {})[t] = v
+        disc[(fy, t)] = r.get("DiscDate")
 
     fys = sorted(by_fy)
     if len(fys) < 2:
@@ -198,7 +199,64 @@ def quarterly_revenue_growth(rows: list) -> dict:
 
     return {"cumulative": (cur[t] - prev[t]) / prev[t] * 100,
             "standalone": sa, "period": t,
-            "cur_fy": cur_fy, "prev_fy": prev_fy}
+            "cur_fy": cur_fy, "prev_fy": prev_fy,
+            "disc_date": disc.get((cur_fy, t))}
+
+
+def progress_rate(rows: list) -> dict:
+    """
+    直近の四半期決算の「進捗率」＝通期の会社予想に対する達成率を返す。
+
+    片山晃『5年で1億貯める株式投資』PART 5 より：
+
+      進捗率 = 四半期決算の業績が通期予想の何%を達成しているか。
+      1年を4分割している四半期決算ごとに25%ずつ達成すれば通期100%。
+      「まあまあ好決算」＝第1四半期で約25%、第2四半期で50%を
+      わずかに下回る49%といった**中途半端な数字**。
+
+    著者は「売上高や営業利益より進捗率で見たほうがわかりやすい」と書いている。
+    理由は、期初に会社が出した予想への期待はすでに株価に織り込まれており、
+    「広げた風呂敷に対して実際どうだったか」が進捗率だから。
+
+    ⚠️ **J-Quants無料プランのデータは約16〜17週（4か月）遅れる**
+       （2026-09-01に実測：最新開示が2026-05-15）。そのため8月発表の1Qは
+       12月ごろまで入らない。表示には必ず開示日を添えること。
+    ⚠️ 通期決算（CurPerType="FY"）は当期予想が空になるので進捗率は出ない。
+    ⚠️ 著者自身が「不動産株など四半期ごとのブレが大きい会社では、進捗率が
+       悪いからと売るのは誤った判断になりうる」と注意している。
+
+    戻り値: {"sales": 売上の進捗率%, "op": 営業利益の進捗率%,
+             "expected": 目安%（25×四半期数）, "period": "2Q"} / 出せなければ None
+    """
+    # いちばん新しい開示を探す。それが通期決算（FY）なら、その年度は
+    # 終わっているので進捗率に意味は無い（古い3Qの数字を出すと誤解を招く）
+    latest = None
+    for r in rows:
+        t, fy = r.get("CurPerType"), r.get("CurFYEn")
+        if not t or not fy:
+            continue
+        key = (fy, _ORDER.get(t, 0), r.get("DiscDate") or "")
+        if latest is None or key > latest[0]:
+            latest = (key, r)
+    if latest is None or latest[1].get("CurPerType") not in ("1Q", "2Q", "3Q"):
+        return None
+
+    r = latest[1]
+    t = r["CurPerType"]
+    expected = 25.0 * _ORDER.get(t, 0)
+
+    def rate(actual_key, forecast_key):
+        a, f = _num(r.get(actual_key)), _num(r.get(forecast_key))
+        if a is None or not f or f <= 0:
+            return None
+        return a / f * 100
+
+    sales, op = rate("Sales", "FSales"), rate("OP", "FOP")
+    if sales is None and op is None:
+        return None
+    return {"sales": sales, "op": op, "expected": expected,
+            "period": t, "fy": r.get("CurFYEn"),
+            "disc_date": r.get("DiscDate")}
 
 
 if __name__ == "__main__":

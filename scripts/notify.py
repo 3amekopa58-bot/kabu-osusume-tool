@@ -233,19 +233,37 @@ def format_katayama_pick(r, names: dict) -> str:
     # 累計が10%を超えていても直近の四半期単独で失速していれば分かるようにする
     q_cum, q_sa, q_per = (r.get("q_revenue_growth"), r.get("q_revenue_growth_sa"),
                           r.get("q_period"))
+    # J-Quants無料プランは約4か月遅れるので、いつ時点の数字かを必ず添える
+    disc = r.get("jq_disc_date")
+    asof = f"（{disc}時点）" if (disc and disc == disc) else ""
     q_txt = ""
     if q_cum is not None and q_cum == q_cum:
         sa = f"／直近四半期単独{pct(q_sa)}" if (q_sa is not None and q_sa == q_sa) else ""
         warn = ""
         if q_sa is not None and q_sa == q_sa and float(q_cum) >= 10 > float(q_sa):
             warn = " ⚠️失速"
-        q_txt = f"\n  {q_per or '四半期'}累計 増収{pct(q_cum)}{sa}{warn}"
+        q_txt = f"\n  {q_per or '四半期'}累計 増収{pct(q_cum)}{sa}{warn}{asof}"
+
+    # 進捗率（PART 5）。四半期ごとに25%ずつ達成すれば通期100%が目安。
+    # 著者は「売上高や営業利益より進捗率で見たほうがわかりやすい」と書いている
+    # （期初予想への期待はすでに株価に織り込まれているため）
+    ps, po, pe = (r.get("progress_sales"), r.get("progress_op"),
+                  r.get("progress_expected"))
+    prog_txt = ""
+    if pe is not None and pe == pe and any(v is not None and v == v for v in (ps, po)):
+        def rate(v):
+            return f"{float(v):.0f}%" if (v is not None and v == v) else "?"
+        # 目安を下回る＝著者のいう「まあまあ好決算」の水準
+        behind = "  ※目安割れ" if (po is not None and po == po
+                                  and float(po) < float(pe)) else ""
+        prog_txt = (f"\n  進捗率 売上{rate(ps)}／営業利益{rate(po)}"
+                    f"（目安{float(pe):.0f}%）{behind}{asof}")
 
     return (
         f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]{cwh_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
-        f" / PER{float(r['per']):.1f}倍{roe_txt}{q_txt}{listing_txt}\n"
+        f" / PER{float(r['per']):.1f}倍{roe_txt}{q_txt}{prog_txt}{listing_txt}\n"
         f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
         f"  利確目標なし・期限なし（上昇が続く限り持つ）"
     )
@@ -340,8 +358,11 @@ def build_message() -> str:
             "★=上場5年以内 ☆=10年以内（伸びしろが大きい）。"
             "【カップ】=カップ・ウィズ・ハンドル完成（この形の新高値は"
             "重複しない3期間すべてでPFが改善＝優先度が高い）。"
-            "増収率は年次（検証済みの条件）。四半期の前年同期比は著者が"
+            "増収率は年次（検証済みの条件）。四半期の前年同期比と進捗率は著者が"
             "本来見ている粒度で、参考情報として併記している"
+            "（J-Quants無料プランは約4か月遅れるので時点を併記。"
+            "進捗率は通期決算が最新の期には出ない。"
+            "不動産株など四半期のブレが大きい業種では目安割れでも判断材料にしない）"
         )
 
     footer = (
