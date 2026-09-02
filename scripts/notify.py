@@ -318,8 +318,14 @@ def build_message() -> str:
             if isinstance(r.get("buy_timing"), str) and "買いタイミング" in r["buy_timing"]]
 
     # 採用ルールの全条件を満たす銘柄と、一部しか満たさない銘柄を分ける。
-    # バックテストの成績（勝率60.6%・PF2.65）は全条件が揃った場合の数字で、
-    # 一部しか満たさない銘柄に当てはめてはいけないため、混ぜて出さない
+    # バックテストの成績は全条件が揃った場合の数字で、一部しか満たさない
+    # 銘柄に当てはめてはいけないため、混ぜて出さない。
+    # ⚠️ 期間で数字が大きく違う（2026-09-02に全期間を実測）：
+    #     5年 2,632件 勝率59.8% PF2.52 平均+4.97%
+    #    10年 5,542件 勝率52.5% PF1.69 平均+2.73%
+    #    26年13,633件 勝率51.8% PF1.71 平均+3.04%
+    # 通知に出す EXPECTED_PCT / STOP_HIT_RATE は**26年の値**を使っている。
+    # 5年の数字（勝率60.6%）は直近相場に偏っているので通知には出さないこと
     full = [r for r in cand if bool(r.get("conditions_all"))]
     partial = sorted([r for r in cand if not bool(r.get("conditions_all"))],
                      key=lambda r: -int(r.get("conditions_met", 0)))
