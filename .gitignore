@@ -6,3 +6,10 @@ output/
 .env
 data/price_cache/
 data/.jquants_token.json
+
+# J-Quantsから取得したデータ本体はコミットしない。
+# 規約で「取得したデータそのものを閲覧できる形で配布・シェアする」ことが
+# 禁止されており、Publicリポジトリに置くと第三者が閲覧できる状態になるため
+# （https://jpx-jquants.com/ja/help/usage で2026-09-02に確認）。
+# 必要なときは scripts/build_jquants_financials.py で再取得する（約20分）。
+data/jquants_summary.json

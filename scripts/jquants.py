@@ -38,11 +38,17 @@ ENV_PATH = ROOT / ".env"
 BASE = "https://api.jquants.com/v2"
 # プラン別のレート制限（公式 https://jpx-jquants.com/ja/spec/rate-limits）
 #   Free 5回/分 / Light 60回/分 / Standard 120回/分 / Premium 500回/分
-# 2026-09-02にStandardへ移行。120回/分＝0.5秒間隔なので、安全側に倒して0.6秒。
-# ⚠️ 大幅に超過し続けると5分程度アクセスが遮断されるので、余裕を持たせている。
+# 2026-09-02にStandardへ移行。表向きは120回/分（0.5秒間隔）だが、
+# **0.6秒間隔で944銘柄を回したら849件が HTTP 429 になった**（同日に実測）。
+# 公称値どおりには出ないので、実測に合わせて1.2秒（≒50回/分）にしている。
+# それでも無料プラン（13秒）の20倍以上速い。
+# ⚠️ 大幅に超過し続けると5分程度アクセスが遮断される。
 # プランを変えたらこの値も直すこと（既定引数なので import 時に束縛される。
 # 実行中に定数だけ書き換えても効かない）
-MIN_INTERVAL_SEC = 0.6
+MIN_INTERVAL_SEC = 1.2
+# 429（レート超過）が返ったときの待ち時間と再試行回数
+RATE_LIMIT_BACKOFF_SEC = 60.0
+RATE_LIMIT_RETRIES = 3
 
 
 def _load_env() -> dict:
@@ -79,15 +85,23 @@ class JQuantsClient:
         self._last_call = 0.0
 
     def _get(self, path: str, params: dict) -> dict:
-        wait = self.min_interval - (time.time() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        r = requests.get(f"{BASE}{path}", params=params,
-                         headers=self._headers, timeout=60)
-        self._last_call = time.time()
-        if r.status_code != 200:
+        # 429が返ったら少し待って数回だけやり直す。一度詰まると数分間
+        # 遮断されるので、失敗のたびに待ち時間を伸ばす
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            wait = self.min_interval - (time.time() - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+            r = requests.get(f"{BASE}{path}", params=params,
+                             headers=self._headers, timeout=60)
+            self._last_call = time.time()
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code == 429 and attempt < RATE_LIMIT_RETRIES:
+                time.sleep(RATE_LIMIT_BACKOFF_SEC * (attempt + 1))
+                self._last_call = time.time()
+                continue
             raise RuntimeError(f"{path} が HTTP {r.status_code}: {r.text[:200]}")
-        return r.json()
+        raise RuntimeError(f"{path}: レート制限で {RATE_LIMIT_RETRIES} 回試して失敗")
 
     def summary(self, code: str) -> list:
         """
