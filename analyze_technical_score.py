@@ -31,6 +31,10 @@ from price_cache import fetch_histories
 
 BASE_DIR = Path(__file__).parent
 SUSPICIOUS_RETURN_THRESHOLD = 500.0
+# 再現した指標をここに保存する。全13,633件の再現に約8分かかるので、
+# 配点を変えて試すたびに待たなくて済むようにキャッシュする。
+# （株価から導いた中間データなのでコミットはしない＝.gitignore）
+CACHE_PATH = BASE_DIR / "data" / "technical_rows.csv"
 DEFAULT_TRADES = ("output/backtest_trades_timesl10d60_either_trend_marketadx_"
                   "volume_rs_universe_max_20260830.csv")
 
@@ -137,7 +141,11 @@ def main():
             print(f"  {i:,}/{len(df):,} 件")
 
     r = pd.DataFrame(rows)
-    print(f"\n再現できたトレード: {len(r):,}件")
+    if not limit:
+        # 全件で回したときだけキャッシュを更新する（サンプルで上書きしない）
+        r.to_csv(CACHE_PATH, index=False)
+        print(f"\n再現結果を保存しました: {CACHE_PATH.name}")
+    print(f"再現できたトレード: {len(r):,}件")
     print(f"期間: {r['entry_date'].min().date()} 〜 {r['entry_date'].max().date()}\n")
 
     print("=== テクニカルスコアの帯別（スコアが高いほど良いはず）===")

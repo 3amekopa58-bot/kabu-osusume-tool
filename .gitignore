@@ -13,3 +13,7 @@ data/.jquants_token.json
 # （https://jpx-jquants.com/ja/help/usage で2026-09-02に確認）。
 # 必要なときは scripts/build_jquants_financials.py で再取得する（約20分）。
 data/jquants_summary.json
+
+# 株価から再現した指標の中間キャッシュ（analyze_technical_score.py が作る）。
+# 全件で約8分かかるが再生成できるのでコミットしない
+data/technical_rows.csv
