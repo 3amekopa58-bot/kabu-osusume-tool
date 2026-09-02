@@ -30,3 +30,16 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python3 scripts/notify.py
+
+      # 推奨結果を残す。これが無いと「その日に何を推奨したか」の記録が
+      # ジョブ終了とともに消え、後から実運用の成績を検証できない
+      # （output/ はgitignoreされているのでコミットもされない）。
+      # 90日保持。実測の勝率・期待値を出すにはこの記録が要る
+      - name: Save recommendations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendations-${{ github.run_id }}
+          path: output/recommend_*.csv
+          retention-days: 90
+          if-no-files-found: warn
