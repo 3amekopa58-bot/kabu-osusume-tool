@@ -52,6 +52,12 @@ FUNDAMENTAL_FAILURE_WARN_RATIO = 0.3
 # 別枠で出す。14年5,768件の検証で、勝率はほぼ同じままPFが1.83倍・平均リターンが
 # 1.85倍になった条件を使う（件数は13分の1）
 NEW_HIGH_PERIOD = 250          # 52週高値。著者が現在使っている期間
+# 時価総額の上限（億円）。著者は「時価総額50億円〜数百億円台の中小型株」を
+# 対象にしている（PART 6 条件①）。26年のトレードを時価総額バンド別に見たところ、
+# **300億円未満が重複しない3期間すべてで最良**だった（REQUIREMENTS 4.4-25）。
+# ⚠️ 必須条件にはしない。時価総額を出せるのはEDINETに株数がある729/944銘柄
+# だけで、必須にすると判定不能な215銘柄を落としてしまうため。印として出す。
+KATAYAMA_SMALL_CAP_OKU = 300
 KATAYAMA_STOP_LOSS_PCT = 8.0   # 損切り-8%（現行ルールの-10%より厳しい）
 
 # 条件は2種類を併記する。書籍に明記された条件と、このツールの検証で最も
@@ -890,6 +896,7 @@ def load_growth() -> dict:
             "roe": (ni / na * 100) if (ni is not None and na and na > 0) else None,
             "period_end": cur["period_end"],
             "eps": cur.get("eps"),
+            "shares": cur.get("shares"),
         }
     return out
 
@@ -1062,6 +1069,9 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["katayama_book"] = _match(KATAYAMA_BOOK)
     pool["katayama_tested"] = _match(KATAYAMA_TESTED)
     pool["katayama_long"] = _match(KATAYAMA_LONG)
+    # 小型株の印（必須条件ではない）。時価総額が分からない銘柄は False のまま
+    cap = pd.to_numeric(pool.get("market_cap_oku"), errors="coerce")
+    pool["small_cap"] = (cap.notna() & (cap < KATAYAMA_SMALL_CAP_OKU))
     pool["katayama"] = (pool["katayama_book"] | pool["katayama_tested"]
                         | pool["katayama_long"])
 
@@ -1154,6 +1164,14 @@ def main():
         g = growth.get(r["code"], {})
         r["revenue_growth"] = g.get("revenue_growth")
         r["profit_growth"] = g.get("profit_growth")
+        # 時価総額（億円）＝株価 × 発行済株式数。EDINETに株数がある銘柄だけ。
+        # ⚠️ ここは第2段階（info取得）より前なので "price" はまだ入っていない。
+        # 第1段階で入る "last_close"（終値）を使う
+        sh, px = g.get("shares"), r.get("last_close")
+        try:
+            r["market_cap_oku"] = float(px) * sh / 1e8 if sh and px is not None else None
+        except (TypeError, ValueError):
+            r["market_cap_oku"] = None
         r["roe"] = g.get("roe")
 
     def _tech(r):
@@ -1236,7 +1254,7 @@ def main():
         "kahanshin", "pullback",
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
-        "new_high", "cup_with_handle", "revenue_growth", "profit_growth", "roe", "years_since_listing",
+        "new_high", "cup_with_handle", "market_cap_oku", "small_cap", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested", "katayama_long",
         "downward_revisions", "q_revenue_growth", "q_revenue_growth_sa",
         "q_period", "progress_sales", "progress_op", "progress_expected", "jq_disc_date",
