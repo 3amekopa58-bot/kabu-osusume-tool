@@ -99,11 +99,18 @@ LISTING_DATES_PATH = BASE_DIR / "data" / "listing_dates.json"
 
 # 片山晃 PART 7 のNGポイント②「下方修正を連発する会社は避ける」。
 # J-Quants（JPX公式）の財務サマリーから会社予想の推移を追って数える。
-# ⚠️ 無料プランはAPIコール5件/分なので、944銘柄すべてには回せない
-# （3.4時間かかる）。**片山流の候補になり得る銘柄だけ**に絞って呼ぶ。
-# 下方修正のチェックが要るのは片山流の判定だけなので、これで足りる。
-KATAYAMA_MAX_DOWNWARD_REVISIONS = 2   # これ以上なら除外（書籍は「上場5年以内に2回以上」）
-JQUANTS_MAX_LOOKUPS = 12              # 1回の実行でJ-Quantsに問い合わせる上限
+# 2026-09-02にStandardプランへ移行し、120件/分・遅延なし・10年分になった。
+# 944銘柄すべてに回すと8分かかるので、**片山流の候補だけ**に絞る方針は維持する
+# （下方修正のチェックが要るのは片山流の判定だけなので、これで足りる）。
+# 書籍の条件は**「上場5年以内に下方修正2回以上」**で、期間が限定されている。
+# ⚠️ 2026-09-02にStandardプランへ移行して10年分が見えるようになったところ、
+# 期間を切らずに数えていたため古い会社ほど回数が積み上がり、候補がほぼ全滅した
+# （エレコム2回・ハピネット3回・不二製油5回）。書籍どおり窓を切ること。
+KATAYAMA_MAX_DOWNWARD_REVISIONS = 2
+KATAYAMA_REVISION_WINDOW_YEARS = 5    # 上場から何年以内を見るか（書籍の規定）
+# 1回の実行でJ-Quantsに問い合わせる上限。Standardは120件/分なので
+# 60件でも約36秒しかかからない（無料プランのときは12件で2.6分かかっていた）
+JQUANTS_MAX_LOOKUPS = 60
 OUTPUT_DIR = BASE_DIR / "output"
 EDINET_CACHE_PATH = BASE_DIR / "data" / "edinet_valuation_diff.json"
 
@@ -887,6 +894,20 @@ def load_growth() -> dict:
     return out
 
 
+def load_listing_dates() -> dict:
+    """
+    銘柄ごとの上場日（"YYYY-MM-DD"）を返す。通信不要。
+    2001年以前から上場している銘柄（old_listing）は、yfinanceのデータ開始日が
+    本当の上場日ではないので除く。片山流NGポイント②の「上場5年以内」という
+    窓を切るのに使う。
+    """
+    if not LISTING_DATES_PATH.exists():
+        return {}
+    data = json.loads(LISTING_DATES_PATH.read_text(encoding="utf-8"))["data"]
+    return {code: r["first_trade_date"] for code, r in data.items()
+            if not r.get("old_listing") and r.get("first_trade_date")}
+
+
 def load_listing_years() -> dict:
     """
     銘柄ごとの上場からの年数を返す（通信不要）。
@@ -910,7 +931,7 @@ def load_listing_years() -> dict:
     return out
 
 
-def fetch_jquants_facts(codes: list) -> dict:
+def fetch_jquants_facts(codes: list, listing_dates: dict = None) -> dict:
     """
     J-Quants から片山流の候補について2つを引く（1銘柄1コールで両方まかなう）。
 
@@ -925,6 +946,7 @@ def fetch_jquants_facts(codes: list) -> dict:
     APIキーが無い・APIが落ちている場合は静かに空を返す＝除外しない。
     ここで落ちて推奨全体が出せなくなるほうが困るため。
     """
+    listing_dates = listing_dates or {}
     if not codes:
         return {}
     try:
@@ -938,12 +960,22 @@ def fetch_jquants_facts(codes: list) -> dict:
 
     out = {}
     print(f"  片山流の候補{len(codes)}銘柄をJ-Quantsで確認します"
-          f"（下方修正＋四半期の前年同期比＋進捗率・1銘柄13秒）…")
+          f"（下方修正＋四半期の前年同期比＋進捗率）…")
     for code in codes:
         try:
             rows = cli.summary(code)
+            # NGポイント②は「上場5年以内」の話なので、その窓だけを数える。
+            # 上場から5年を過ぎた会社にはこの条件を適用しない（Noneを返す）
+            listed = listing_dates.get(code)
+            down = None
+            if listed:
+                since = listed
+                end = (dt.date.fromisoformat(listed)
+                       + dt.timedelta(days=365 * KATAYAMA_REVISION_WINDOW_YEARS))
+                if dt.date.today() <= end:
+                    down = count_downward_revisions(rows, since=since)["down"]
             out[code] = {
-                "down": count_downward_revisions(rows)["down"],
+                "down": down,
                 "quarter": quarterly_revenue_growth(rows),
                 "progress": progress_rate(rows),
             }
@@ -1045,7 +1077,8 @@ def build_ranking(rows: list[dict], budget: int = BUDGET, market_regime_up: bool
     pool["jq_disc_date"] = None
     cand = pool.index[pool["katayama"]].tolist()[:JQUANTS_MAX_LOOKUPS]
     if cand:
-        facts = fetch_jquants_facts([str(pool.at[i, "code"]) for i in cand])
+        facts = fetch_jquants_facts([str(pool.at[i, "code"]) for i in cand],
+                                    load_listing_dates())
         for i in cand:
             f = facts.get(str(pool.at[i, "code"])) or {}
             q = f.get("quarter") or {}

@@ -36,8 +36,13 @@ ROOT = Path(__file__).parent.parent
 ENV_PATH = ROOT / ".env"
 
 BASE = "https://api.jquants.com/v2"
-# 無料プランは5件/分。安全側に倒して1リクエストごとに待つ
-MIN_INTERVAL_SEC = 13.0
+# プラン別のレート制限（公式 https://jpx-jquants.com/ja/spec/rate-limits）
+#   Free 5回/分 / Light 60回/分 / Standard 120回/分 / Premium 500回/分
+# 2026-09-02にStandardへ移行。120回/分＝0.5秒間隔なので、安全側に倒して0.6秒。
+# ⚠️ 大幅に超過し続けると5分程度アクセスが遮断されるので、余裕を持たせている。
+# プランを変えたらこの値も直すこと（既定引数なので import 時に束縛される。
+# 実行中に定数だけ書き換えても効かない）
+MIN_INTERVAL_SEC = 0.6
 
 
 def _load_env() -> dict:
@@ -102,7 +107,8 @@ class JQuantsClient:
         return self._get("/equities/bars/daily", {"code": c, "date": date}).get("data", [])
 
 
-def count_downward_revisions(rows: list, key: str = "FOP") -> dict:
+def count_downward_revisions(rows: list, key: str = "FOP",
+                             since: str = None) -> dict:
     """
     会社予想の下方修正・上方修正の回数を数える。
 
@@ -111,6 +117,12 @@ def count_downward_revisions(rows: list, key: str = "FOP") -> dict:
     通期決算では当期予想が空になり翌期予想（NxF...）に入るので、当期予想が
     ある開示だけを対象にする。
 
+    `since`（"YYYY-MM-DD"）を渡すと、その日以降の開示だけを数える。
+    片山晃 PART 7 のNGポイント②は**「上場5年以内に下方修正2回以上」**と
+    期間が限定されているため、上場日を渡して窓を切るのに使う。
+    ⚠️ これを渡さないと、取得できた全期間（Standardプランでは10年）の
+    累計になり、古い会社ほど不利になる。
+
     戻り値: {"down": 下方修正の回数, "up": 上方修正の回数,
              "periods": 判定できた決算期数, "detail": [...]}
     """
@@ -118,9 +130,12 @@ def count_downward_revisions(rows: list, key: str = "FOP") -> dict:
     for r in rows:
         fy = r.get("CurFYEn")
         v = _num(r.get(key))
+        d = r.get("DiscDate")
         if not fy or v is None:
             continue
-        by_period.setdefault(fy, []).append((r.get("DiscDate"), v))
+        if since and (not d or d < since):
+            continue
+        by_period.setdefault(fy, []).append((d, v))
 
     down = up = 0
     detail = []
