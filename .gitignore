@@ -17,3 +17,7 @@ data/jquants_summary.json
 # 株価から再現した指標の中間キャッシュ（analyze_technical_score.py が作る）。
 # 全件で約8分かかるが再生成できるのでコミットしない
 data/technical_rows.csv
+
+# EDINETから作った貸借対照表の履歴（build_netnet_history.py が作る）。
+# 公開情報だが8MBあり、再取得できる（約1時間）のでコミットしない
+data/netnet_history.json
