@@ -237,6 +237,38 @@ def fetch_market_regime(adx_threshold: float = 20.0) -> bool:
     return bool(is_uptrend and is_strong_trend)
 
 
+# 押し目帯：日経平均が直近1年高値から何%下げているか。
+# 26年13,633トレードで、**高値から-15〜-8%の局面**が重複しない3期間すべてで
+# 全体を上回った（勝率 51.8%→63.9% / PF 1.71→3.10。REQUIREMENTS 4.4-31）。
+# ⚠️ **必須条件にはしない。** この帯に入る日は全体の1割程度しかなく、
+# 必須にすると残り9割の期間は推奨がゼロになるため。印として出す。
+# ⚠️ ADX20超の条件と**組み合わせて**効いているとみられる。下落の途中は
+# トレンドが崩れてADXが下がるため、ADX条件が「下げの最中」を除いている。
+# 単独の条件として切り出さないこと。
+DIP_BAND_LOW = -15.0
+DIP_BAND_HIGH = -8.0
+DIP_PEAK_WINDOW = 250
+
+
+def fetch_market_dip() -> dict:
+    """
+    日経平均が直近1年高値から何%下げているかと、押し目帯に入っているかを返す。
+    データ不足や取得失敗時は None を返す（判定しない＝印を付けない）。
+    """
+    try:
+        idx = fetch_history("^N225", period="2y", stale_days=0)
+        close = idx["Close"]
+        peak = close.rolling(DIP_PEAK_WINDOW, min_periods=20).max()
+        dd = (close.iloc[-1] / peak.iloc[-1] - 1) * 100
+        if pd.isna(dd):
+            return {}
+        return {"dd_pct": float(dd),
+                "in_dip_band": bool(DIP_BAND_LOW < dd <= DIP_BAND_HIGH)}
+    except Exception as e:
+        print(f"  日経の押し目判定を省略します: {e}")
+        return {}
+
+
 def calc_rsi(close: pd.Series, period: int = 14) -> float:
     delta = close.diff()
     gain = delta.clip(lower=0)
@@ -1128,6 +1160,13 @@ def main():
         market_regime_up = True
     print(f"  日経平均は{'上昇トレンド・ADXも強い' if market_regime_up else '上昇トレンドでない、またはADXが弱い（レンジ相場）'}と判定")
 
+    # 押し目帯の判定（印として出すだけ。候補は絞らない）
+    dip = fetch_market_dip()
+    if dip:
+        print(f"  日経平均は直近1年高値から {dip['dd_pct']:+.1f}%"
+              f"（押し目帯 {DIP_BAND_LOW}〜{DIP_BAND_HIGH}% に"
+              f"{'該当' if dip['in_dip_band'] else '非該当'}）")
+
     tickers = load_tickers()
     edinet_cache = load_edinet_cache()
     try:
@@ -1242,6 +1281,11 @@ def main():
               "    時間を置いて再実行してください。")
 
     df, excluded = build_ranking(rows, market_regime_up=market_regime_up)
+    # 相場環境は全銘柄に共通なので、各行に同じ値を載せて通知側から読めるようにする
+    df["nikkei_dd_pct"] = dip.get("dd_pct")
+    # ⚠️ 押し目帯はADX条件と組み合わせて効いている（下落の最中はADXが下がり
+    # 除外される）。ADXが弱い日は印を付けない
+    df["market_dip_band"] = bool(dip.get("in_dip_band")) and market_regime_up
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     out_path = OUTPUT_DIR / f"recommend_{dt.date.today():%Y%m%d}.csv"
@@ -1254,7 +1298,8 @@ def main():
         "kahanshin", "pullback",
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
-        "new_high", "cup_with_handle", "market_cap_oku", "small_cap", "revenue_growth", "profit_growth", "roe", "years_since_listing",
+        "new_high", "cup_with_handle", "market_cap_oku", "small_cap",
+        "nikkei_dd_pct", "market_dip_band", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested", "katayama_long",
         "downward_revisions", "q_revenue_growth", "q_revenue_growth_sa",
         "q_period", "progress_sales", "progress_op", "progress_expected", "jq_disc_date",

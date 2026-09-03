@@ -305,6 +305,17 @@ CWH_HANDLE_MAX_DEPTH = 0.15  # ハンドルは浅い（深いとカップの作�
 # 成績を見ながら動かしていない（動かすと探索になり検証の意味が無くなる）
 CWH_RECENT_LOOKBACK = 60
 
+# --- 押し目帯フィルター（日経平均が直近1年高値から何%下げているか）---
+# 26年13,633トレードを日経のドローダウン別に見たところ、
+# **高値から-15〜-8%の局面**が重複しない3期間すべてで全体を上回った
+# （PF 8.74/2.40/4.64 vs 全体 1.94/1.58/1.61。REQUIREMENTS 4.4-31）。
+# 浅すぎると押し目になっておらず、深すぎると下落トレンド入りしている、
+# という解釈が自然。ADXとは相関+0.200で別の情報を持っている。
+# ⚠️ 数値は先に決めた（-15/-8）。成績を見ながら動かしていない。
+DIP_BAND_LOW = -15.0
+DIP_BAND_HIGH = -8.0
+DIP_PEAK_WINDOW = 250
+
 
 def calc_cup_with_handle(close: pd.Series, period: int = 250) -> pd.Series:
     """
@@ -424,6 +435,7 @@ def backtest_ticker(
     dev_filter: bool = False,
     cwh_filter: bool = False,
     cwh_recent_filter: bool = False,
+    dip_filter: bool = False,
     dev_threshold: float = 20.0,
     dev_ma_period: int = 25,
     exit_dev_threshold: float = 20.0,
@@ -536,6 +548,14 @@ def backtest_ticker(
 
     ma_periods = (5, 10, 20, 50, 100)
     sma = {n: close.rolling(n).mean() for n in ma_periods} if trend_filter else None
+
+    # 押し目帯：日経平均が直近1年高値から DIP_BAND_LOW〜HIGH% の範囲にある日だけ
+    dip_ok = None
+    if dip_filter and nikkei_close is not None:
+        nk_dd = (nikkei_close
+                 / nikkei_close.rolling(DIP_PEAK_WINDOW, min_periods=20).max() - 1) * 100
+        dip_ok = ((nk_dd > DIP_BAND_LOW) & (nk_dd <= DIP_BAND_HIGH)
+                  ).reindex(close.index, method="ffill").fillna(False)
 
     regime_aligned = market_regime.reindex(close.index, method="ffill") if market_regime is not None else None
     sector_regime_aligned = sector_regime.reindex(close.index, method="ffill") if sector_regime is not None else None
@@ -662,6 +682,10 @@ def backtest_ticker(
 
             # カップ・ウィズ・ハンドルの形が完成した日だけに絞る
             if signal and cwh_filter and not bool(cwh_sig.iloc[i]):
+                signal = False
+
+            # 日経が「高値から-15〜-8%」の押し目帯にある日だけに絞る
+            if signal and dip_ok is not None and not bool(dip_ok.iloc[i]):
                 signal = False
 
             # カップ完成後60日以内の押し目だけに絞る
@@ -798,6 +822,7 @@ def parse_config(args) -> dict:
     use_dev_filter = "dev" in rest
     use_cwh_filter = "cwh" in rest
     use_cwh_recent_filter = "cwhrecent" in rest
+    use_dip_filter = "dip" in rest
     use_candle_filter = "candle" in rest
     use_fib_filter = "fib" in rest
     # 損切り幅は "sl10" / "sl15" のような引数で上書きできる（既定は10%）
@@ -845,6 +870,8 @@ def parse_config(args) -> dict:
         filter_desc += "+RSI(14日)が70未満（買われすぎ回避）"
     if use_cwh_filter:
         filter_desc += "+カップ・ウィズ・ハンドルの形が完成した新高値のみ"
+    if use_dip_filter:
+        filter_desc += f"+日経が直近1年高値から{DIP_BAND_LOW}〜{DIP_BAND_HIGH}%の押し目帯"
     if use_cwh_recent_filter:
         filter_desc += f"+直近{CWH_RECENT_LOOKBACK}日以内にカップ・ウィズ・ハンドルが完成"
     if use_dev_filter:
@@ -886,6 +913,7 @@ def parse_config(args) -> dict:
         "use_sector_filter": use_sector_filter, "use_rsi_filter": use_rsi_filter,
         "use_dev_filter": use_dev_filter, "use_cwh_filter": use_cwh_filter,
         "use_cwh_recent_filter": use_cwh_recent_filter,
+        "use_dip_filter": use_dip_filter,
         "use_candle_filter": use_candle_filter,
         "use_fib_filter": use_fib_filter, "stop_loss_pct": stop_loss_pct,
         "new_high_period": new_high_period,
@@ -924,6 +952,7 @@ def run_backtest(cfg: dict, hist_map: dict, name_map: dict, market_regime=None,
                 rsi_filter=cfg["use_rsi_filter"], dev_filter=cfg["use_dev_filter"],
                 cwh_filter=cfg["use_cwh_filter"],
                 cwh_recent_filter=cfg["use_cwh_recent_filter"],
+                dip_filter=cfg["use_dip_filter"],
                 candle_filter=cfg["use_candle_filter"], fib_filter=cfg["use_fib_filter"],
                 stop_loss_pct=cfg["stop_loss_pct"], time_stop_days=cfg["time_stop_days"],
                 entry_mode=cfg["entry_mode"], cost_pct=cfg["cost_pct"], side=cfg["side"],
@@ -1006,6 +1035,7 @@ def main():
     use_dev_filter = cfg["use_dev_filter"]
     use_cwh_filter = cfg["use_cwh_filter"]
     use_cwh_recent_filter = cfg["use_cwh_recent_filter"]
+    use_dip_filter = cfg["use_dip_filter"]
     use_candle_filter = cfg["use_candle_filter"]
     use_fib_filter = cfg["use_fib_filter"]
     stop_loss_pct = cfg["stop_loss_pct"]
@@ -1073,7 +1103,7 @@ def main():
         market_suffix = ""
     # side を必ずファイル名に含める（含めないと空売りの結果が買いの結果を
     # 上書きしてしまう。2026-08-29に実際に上書き事故を起こしたため明示）
-    suffix = ("_short" if side == "short" else "") + (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_cwh" if use_cwh_filter else "") + ("_cwhrecent" if use_cwh_recent_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
+    suffix = ("_short" if side == "short" else "") + (f"_{entry_mode}" if entry_mode != "kahanshin" else "") + (f"_cost{cost_pct*100:.0f}" if cost_pct else "") + ("_trend" if trend_filter else "") + market_suffix + ("_volume" if use_volume_filter else "") + ("_rs" if use_rs_filter else "") + ("_earnings" if use_earnings_filter else "") + ("_sector" if use_sector_filter else "") + ("_rsi" if use_rsi_filter else "") + ("_dev" if use_dev_filter else "") + ("_cwh" if use_cwh_filter else "") + ("_cwhrecent" if use_cwh_recent_filter else "") + ("_dip" if use_dip_filter else "") + ("_candle" if use_candle_filter else "") + ("_fib" if use_fib_filter else "")
     tag = {
         "ppp_break": "ppp", "atr_trail": "atrtrail", "ppp_or_atr": "pporatr",
         "time_stop": "timestop", "ppp_or_time": "pportime",

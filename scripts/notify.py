@@ -368,6 +368,17 @@ def build_message() -> str:
         parts.append(f"★片山流・{spec['label']} {len(picks)}件")
         parts += [format_katayama_pick(r, names) for r in picks[:PICK_COUNT]]
         parts.append(f"　※{spec['stats']}")
+    # 押し目帯の注記（相場環境なので銘柄ごとではなく全体に1行追加する）
+    dip_note = ""
+    if not df.empty and bool(df.iloc[0].get("market_dip_band")):
+        dd = df.iloc[0].get("nikkei_dd_pct")
+        dd_txt = f"（高値から{float(dd):+.1f}%）" if (dd is not None and dd == dd) else ""
+        dip_note = (f"\n📉 本日は日経が押し目帯{dd_txt}。"
+                    "過去26年の実測では、この局面のトレードは"
+                    "勝率63.9%・PF3.10（全体は51.8%・1.71）。"
+                    "ただし該当するのは全体の約1割の期間で、"
+                    "ADXが強いことが前提の数字です")
+
     if any_kata:
         parts.append(
             "　※片山流は現行ルールより当たり外れが大きい（2018/2021/2022年は負け越し）。"
@@ -393,6 +404,7 @@ def build_message() -> str:
     )
     if cand and not bool(cand[0].get("cond_regime", True)):
         footer += "\n⚠️日経がレンジ相場（ADX20未満）。この局面は過去の成績が落ちるため慎重に"
+    footer += dip_note
 
     return "\n\n".join(["本日のおすすめ（すべて現物買い）"] + parts + [footer])
 
