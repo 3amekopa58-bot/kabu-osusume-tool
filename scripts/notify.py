@@ -353,10 +353,20 @@ CONDITION_LABELS = [
 
 
 def missing_note(row) -> str:
-    """満たしていない条件を列挙した1行を返す。"""
+    """
+    採用条件の充足数を⭐︎で示し、満たしていない条件を列挙する。
+
+    ⚠️ **⭐︎の数に成績の数字は添えない。** 26年122,309件で測ると
+    全期間では単調に良くなる（1/5 PF1.24 → 5/5 1.52）が、
+    **重複しない3期間では一貫しない**（第2期は5/5が1.13で1/5の1.53を下回る。
+    第3期も4/5のほうが5/5より良い）。REQUIREMENTS 4.4-37。
+    ⭐︎は「いくつ満たしたか」という事実の表示にとどめる。
+    """
     missing = [label for key, label in CONDITION_LABELS if not bool(row.get(key))]
-    met = len(CONDITION_LABELS) - len(missing)
-    return f"  条件 {met}/{len(CONDITION_LABELS)} ・未達: {' / '.join(missing)}"
+    total = len(CONDITION_LABELS)
+    met = total - len(missing)
+    stars = "⭐︎" * met + "☆" * len(missing)
+    return f"  {stars} 条件{met}/{total}" + (f" ・未達: {' / '.join(missing)}" if missing else "")
 
 
 def build_message() -> str:
