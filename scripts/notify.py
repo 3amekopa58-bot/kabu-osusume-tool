@@ -155,6 +155,41 @@ def fetch_atr(code: str) -> float:
         return None
 
 
+# 印がいくつ付いているかで成績が変わることを26年5,768トレードで実測した
+# （REQUIREMENTS 4.4-33）。印は互いに独立していて、重ねるほど良くなる：
+#   0個 PF1.31 勝率49.1% / 1個 1.92 53.4% / 2個 2.36 59.3% / 3個 8.47 77.3%
+# ⚠️ 3個そろうのは全体の2.2%（128件）しかない。PF8.47は少数のトレードに
+#    依存しており、そのまま期待してはいけない。
+MARK_STATS = {0: (1.31, 49.1), 1: (1.92, 53.4), 2: (2.36, 59.3), 3: (8.47, 77.3)}
+
+
+def count_marks(r) -> int:
+    """
+    その銘柄に付いている印の数（小型／割安／押し目帯）。
+    ⚠️ カップは含めない。**本命ルール（押し目買い）では効いていない**
+    （PF1.65 vs 全体1.67）。カップは新高値と組み合わせたときだけ効く
+    （REQUIREMENTS 4.4-19）ので、片山流枠だけの印にしている。
+    """
+    n = 0
+    if bool(r.get("small_cap")):
+        n += 1
+    tier = r.get("kabu1000_tier")
+    if tier and tier == tier:
+        n += 1
+    if bool(r.get("market_dip_band")):
+        n += 1
+    return n
+
+
+def format_marks(r) -> str:
+    """印の数と、その水準の実測成績を1行で返す（印が無ければ空）"""
+    n = count_marks(r)
+    if n == 0:
+        return ""
+    pf, wr = MARK_STATS[min(n, 3)]
+    return f"\n  印{n}個 → 過去の実測で勝率{wr:.0f}%・PF{pf:.2f}（全体は52.7%・1.67）"
+
+
 def format_pick(r, names: dict) -> str:
     """
     1銘柄ぶんの通知テキスト。現物買いを前提とし、利確目安・損切り・期限を示す。
@@ -194,14 +229,17 @@ def format_pick(r, names: dict) -> str:
     # だった（REQUIREMENTS 4.4-32）。本命枠にも意味があるのでここにも出す
     tier = r.get("kabu1000_tier")
     tier_txt = f"【{tier}】" if (tier and tier == tier) else ""
+    cap_txt = "【小型】" if bool(r.get("small_cap")) else ""
+    dip_txt = "【押し目】" if bool(r.get("market_dip_band")) else ""
 
     return (
-        f"[{code}]{display_name(str(r['code']), r['name'], names)}{tag_txt}{tier_txt}\n"
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}"
+        f"{tag_txt}{tier_txt}{cap_txt}{dip_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"{target_line}\n"
         f"  損切り  {stop_price:,.0f}円(-{STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円"
         f" ※到達{STOP_HIT_RATE:.0f}%\n"
-        f"  期限 保有{HOLDING_DAYS_LIMIT}日で手仕舞い"
+        f"  期限 保有{HOLDING_DAYS_LIMIT}日で手仕舞い" + format_marks(r)
     )
 
 
@@ -284,7 +322,7 @@ def format_katayama_pick(r, names: dict) -> str:
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
         f" / PER{float(r['per']):.1f}倍{roe_txt}{cap_line}{q_txt}{prog_txt}{listing_txt}\n"
         f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
-        f"  利確目標なし・期限なし（上昇が続く限り持つ）"
+        f"  利確目標なし・期限なし（上昇が続く限り持つ）" + format_marks(r)
     )
 
 
@@ -392,8 +430,9 @@ def build_message() -> str:
             "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中。"
             "長期版は増益を見ない代わりに長期保有が前提（短期で切るなら書籍版/検証版）。"
             "★=上場5年以内 ☆=10年以内（伸びしろが大きい）。"
-            "【カップ】=カップ・ウィズ・ハンドル完成（この形の新高値は"
-            "重複しない3期間すべてでPFが改善＝優先度が高い）。"
+            "【カップ】=カップ・ウィズ・ハンドル完成（この形の**新高値**は"
+            "重複しない3期間すべてでPFが改善。⚠️押し目買いでは効かないので"
+            "★片山流の枠にだけ付けている）。"
             "【激安/超割安/割安】=かぶ1000流のPBR階級"
             "（0.3未満/0.3-0.4/0.4-0.5。26年5,756件で完全に単調・"
             "重複しない3期間すべてで改善。EDINETのBPSで判定）。"
