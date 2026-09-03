@@ -102,16 +102,19 @@ KATAYAMA_STOP_LOSS_PCT = 8.0    # 損切り-8%（片山氏が「-20〜30%は甘�
 KATAYAMA_VARIANTS = {
     "katayama_book": {
         "label": "書籍版（増収10%↑・増益20%↑・ROE10%↑・PER39倍以下）",
+        "short": "書籍版",
         "stats": "14年388件で勝率46%・PF2.96・平均+5.3%",
     },
     "katayama_tested": {
         "label": "検証版（増収10%↑・増益30%↑・PER20倍未満）",
+        "short": "検証版",
         "stats": "14年576件で勝率51%・PF3.04・平均+4.8%",
     },
     # PART 6「中小型株の中長期投資」。増益を条件にしないのが上2つとの違い。
     # ⚠️ 長期保有が前提。短期で切ると増益条件を付けたほうが良い
     "katayama_long": {
         "label": "長期版（増収10%↑・利益不問・PER39倍以下／長期保有前提）",
+        "short": "長期版",
         "stats": "500日保有の検証で3期間すべて勝率最良（66/45/81%・平均+26/+13/+56%）",
     },
 }
@@ -333,7 +336,9 @@ def format_katayama_pick(r, names: dict) -> str:
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
         f" / PER{float(r['per']):.1f}倍{roe_txt}{cap_line}{q_txt}{prog_txt}{listing_txt}\n"
         f"  損切り  {stop_price:,.0f}円(-{KATAYAMA_STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円\n"
-        f"  利確目標なし・期限なし（上昇が続く限り持つ）" + format_marks(r)
+        # ⚠️ format_marks は**本命ルール（押し目買い）**で測った数字なので
+        # 片山流（新高値ブレイク）には当てはめない。印の有無だけ上部に出す
+        f"  利確目標なし・期限なし（上昇が続く限り持つ）"
     )
 
 
@@ -420,15 +425,26 @@ def build_message() -> str:
 
     # 片山流（別系統）。現行ルールと買う位置が正反対なので混ぜず末尾に別枠で出す。
     # 書籍版と検証版はPERの条件が食い違うので、それぞれ分けて出す
-    any_kata = False
-    for key, spec in KATAYAMA_VARIANTS.items():
-        picks = [r for _, r in df.iterrows() if bool(r.get(key))]
-        if not picks:
-            continue
-        any_kata = True
-        parts.append(f"★片山流・{spec['label']} {len(picks)}件")
-        parts += [format_katayama_pick(r, names) for r in picks[:PICK_COUNT]]
-        parts.append(f"　※{spec['stats']}")
+    # ⚠️ 1銘柄が複数の版に該当することが多い（書籍版・検証版・長期版は
+    # 条件が重なる）。版ごとに出すと**同じ銘柄が3回並ぶ**ので、
+    # **銘柄ごとに1回だけ出して、該当した版を併記する**（2026-09-02修正）
+    kata_rows = []
+    for _, r in df.iterrows():
+        hit = [spec["short"] for key, spec in KATAYAMA_VARIANTS.items()
+               if bool(r.get(key))]
+        if hit:
+            kata_rows.append((r, hit))
+    any_kata = bool(kata_rows)
+    if any_kata:
+        parts.append(f"★片山流（新高値ブレイク）{len(kata_rows)}件")
+        for r, hit in kata_rows[:PICK_COUNT]:
+            parts.append(format_katayama_pick(r, names)
+                         + f"\n  該当: {' / '.join(hit)}")
+        # 該当した版の成績だけを添える
+        shown = {h for _, hits in kata_rows[:PICK_COUNT] for h in hits}
+        for spec in KATAYAMA_VARIANTS.values():
+            if spec["short"] in shown:
+                parts.append(f"　※{spec['short']}: {spec['stats']}")
     # 押し目帯の注記（相場環境なので銘柄ごとではなく全体に1行追加する）
     dip_note = ""
     if not df.empty and bool(df.iloc[0].get("market_dip_band")):
@@ -442,24 +458,15 @@ def build_message() -> str:
 
     if any_kata:
         parts.append(
-            "　※片山流は現行ルールより当たり外れが大きい（2018/2021/2022年は負け越し）。"
-            "書籍版と検証版はPERの条件が逆で、どちらが機能するか検証中。"
-            "長期版は増益を見ない代わりに長期保有が前提（短期で切るなら書籍版/検証版）。"
-            "★=上場5年以内 ☆=10年以内（伸びしろが大きい）。"
-            "【カップ】=カップ・ウィズ・ハンドル完成（この形の**新高値**は"
-            "重複しない3期間すべてでPFが改善。⚠️押し目買いでは効かないので"
-            "★片山流の枠にだけ付けている）。"
-            "【激安/超割安/割安】=かぶ1000流のPBR階級"
-            "（0.3未満/0.3-0.4/0.4-0.5。26年5,756件で完全に単調・"
-            "重複しない3期間すべてで改善。EDINETのBPSで判定）。"
-            "【小型】=時価総額300億円未満（同じく3期間すべてで最良の帯。"
-            "片山流の条件と重ねるとPF2.17→3.32/1.65→2.10/3.36→6.60。"
-            "ただし件数が44〜121件と少ない）。"
-            "増収率は年次（検証済みの条件）。四半期の前年同期比と進捗率は著者が"
-            "本来見ている粒度で、参考情報として併記している"
-            "（J-Quants無料プランは約4か月遅れるので時点を併記。"
-            "進捗率は通期決算が最新の期には出ない。"
-            "不動産株など四半期のブレが大きい業種では目安割れでも判断材料にしない）"
+            "　※片山流は当たり外れが大きい（2018/2021/2022年は負け越し）。\n"
+            "　　印の意味:\n"
+            "　　　【小型】時価総額300億円未満（3期間すべてで最良の帯）\n"
+            "　　　【割安】PBR0.5未満（0.3未満=激安/0.3-0.4=超割安。26年で単調）\n"
+            "　　　【押し目】日経が高値から-15〜-8%かつADXも強い\n"
+            "　　　【カップ】カップ・ウィズ・ハンドル完成"
+            "（⚠️新高値でのみ有効。押し目買いには付けない）\n"
+            "　　　★=上場5年以内 ☆=10年以内\n"
+            "　　増収率は年次（検証済み）。四半期の前年同期比と進捗率は参考情報"
         )
 
     # ⚠️ バックテストは保有中の銘柄に再エントリーしない設計（in_position フラグ）
