@@ -190,9 +190,13 @@ def format_pick(r, names: dict) -> str:
     if r.get("pullback") is True or str(r.get("pullback")).lower() == "true":
         tags.append("押し目")
     tag_txt = f"[{'/'.join(tags)}]" if tags else ""
+    # かぶ1000流のPBR階級（激安/超割安/割安）。26年5,756トレードで完全に単調
+    # だった（REQUIREMENTS 4.4-32）。本命枠にも意味があるのでここにも出す
+    tier = r.get("kabu1000_tier")
+    tier_txt = f"【{tier}】" if (tier and tier == tier) else ""
 
     return (
-        f"[{code}]{display_name(str(r['code']), r['name'], names)}{tag_txt}\n"
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}{tag_txt}{tier_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"{target_line}\n"
         f"  損切り  {stop_price:,.0f}円(-{STOP_LOSS_PCT:.0f}%) = -{stop_loss:,.0f}円"
@@ -228,6 +232,9 @@ def format_katayama_pick(r, names: dict) -> str:
     # 時価総額300億円未満。重複しない3期間すべてでPFが最良だった帯
     # （REQUIREMENTS 4.4-25）。必須条件ではないので印として出す
     cap_txt = "【小型】" if bool(r.get("small_cap")) else ""
+    # かぶ1000流のPBR階級（激安/超割安/割安）。26年で完全に単調だった
+    tier = r.get("kabu1000_tier")
+    tier_txt = f"【{tier}】" if (tier and tier == tier) else ""
     cap = r.get("market_cap_oku")
     cap_line = (f"\n  時価総額 {float(cap):,.0f}億円"
                 if (cap is not None and cap == cap) else "")
@@ -272,7 +279,7 @@ def format_katayama_pick(r, names: dict) -> str:
                     f"（目安{float(pe):.0f}%）{behind}{asof}")
 
     return (
-        f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]{cwh_txt}{cap_txt}\n"
+        f"[{code}]{display_name(str(r['code']), r['name'], names)}[新高値]{cwh_txt}{cap_txt}{tier_txt}\n"
         f"  買い {price:,.0f}円 × {LOT_SIZE}株 = {cost:,.0f}円\n"
         f"  増収{pct(r.get('revenue_growth'))} / 増益{pct(r.get('profit_growth'))}"
         f" / PER{float(r['per']):.1f}倍{roe_txt}{cap_line}{q_txt}{prog_txt}{listing_txt}\n"
@@ -387,6 +394,9 @@ def build_message() -> str:
             "★=上場5年以内 ☆=10年以内（伸びしろが大きい）。"
             "【カップ】=カップ・ウィズ・ハンドル完成（この形の新高値は"
             "重複しない3期間すべてでPFが改善＝優先度が高い）。"
+            "【激安/超割安/割安】=かぶ1000流のPBR階級"
+            "（0.3未満/0.3-0.4/0.4-0.5。26年5,756件で完全に単調・"
+            "重複しない3期間すべてで改善。EDINETのBPSで判定）。"
             "【小型】=時価総額300億円未満（同じく3期間すべてで最良の帯。"
             "片山流の条件と重ねるとPF2.17→3.32/1.65→2.10/3.36→6.60。"
             "ただし件数が44〜121件と少ない）。"

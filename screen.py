@@ -58,6 +58,17 @@ NEW_HIGH_PERIOD = 250          # 52週高値。著者が現在使っている期
 # ⚠️ 必須条件にはしない。時価総額を出せるのはEDINETに株数がある729/944銘柄
 # だけで、必須にすると判定不能な215銘柄を落としてしまうため。印として出す。
 KATAYAMA_SMALL_CAP_OKU = 300
+
+# かぶ1000流のPBR階級（かぶ1000_ルール.md 第2章）：
+#   **0.4以上0.5未満＝割安 / 0.3以上0.4未満＝超割安 / 0.3未満＝激安**
+# 26年5,756トレードで検証したところ、**完全に単調**で、
+# 重複しない3期間すべてで改善した（PF 1.72→2.27 / 0.91→1.41 / 2.90→5.55）。
+# 500日フォワードでは激安帯がPF11.97・勝率75.2%（REQUIREMENTS 4.4-32）。
+# ⚠️ 割安度スコア（総合スコアの50%）と情報が重複するが、スコアは連続値で
+# 埋もれやすいので、書籍由来の明確な閾値を印として示す。
+# ⚠️ 判定には**EDINETのBPS**を使う。検証をこれで行ったため
+# （yfinanceのpriceToBookとは基準日も算出方法も違い、混ぜると検証と食い違う）。
+KABU1000_PBR_TIERS = [(0.3, "激安"), (0.4, "超割安"), (0.5, "割安")]
 KATAYAMA_STOP_LOSS_PCT = 8.0   # 損切り-8%（現行ルールの-10%より厳しい）
 
 # 条件は2種類を併記する。書籍に明記された条件と、このツールの検証で最も
@@ -929,6 +940,7 @@ def load_growth() -> dict:
             "period_end": cur["period_end"],
             "eps": cur.get("eps"),
             "shares": cur.get("shares"),
+            "bps": cur.get("bps"),
         }
     return out
 
@@ -1212,6 +1224,20 @@ def main():
         except (TypeError, ValueError):
             r["market_cap_oku"] = None
         r["roe"] = g.get("roe")
+        # かぶ1000流のPBR階級用。yfinanceのpbrとは別に、検証で使ったのと
+        # 同じEDINETのBPSから算出する
+        bps, px2 = g.get("bps"), r.get("last_close")
+        try:
+            r["pbr_edinet"] = (float(px2) / bps
+                               if bps and bps > 0 and px2 is not None else None)
+        except (TypeError, ValueError, ZeroDivisionError):
+            r["pbr_edinet"] = None
+        r["kabu1000_tier"] = None
+        if r["pbr_edinet"] is not None:
+            for thr, label in KABU1000_PBR_TIERS:
+                if r["pbr_edinet"] < thr:
+                    r["kabu1000_tier"] = label
+                    break
 
     def _tech(r):
         # 株価データが短い銘柄は指標が揃わない。順位付けの前段なので0点扱いにする
@@ -1299,7 +1325,7 @@ def main():
         "cond_signal", "cond_trend", "cond_volume", "cond_rs", "cond_regime",
         "conditions_met", "conditions_all",
         "new_high", "cup_with_handle", "market_cap_oku", "small_cap",
-        "nikkei_dd_pct", "market_dip_band", "revenue_growth", "profit_growth", "roe", "years_since_listing",
+        "nikkei_dd_pct", "market_dip_band", "pbr_edinet", "kabu1000_tier", "revenue_growth", "profit_growth", "roe", "years_since_listing",
         "katayama", "katayama_book", "katayama_tested", "katayama_long",
         "downward_revisions", "q_revenue_growth", "q_revenue_growth_sa",
         "q_period", "progress_sales", "progress_op", "progress_expected", "jq_disc_date",
