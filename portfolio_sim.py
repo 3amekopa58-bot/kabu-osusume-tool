@@ -117,9 +117,17 @@ def build_signals(hist: pd.DataFrame, nikkei_close: pd.Series) -> pd.DataFrame:
 
 def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
              calendar: pd.DatetimeIndex, rule: str, seed: int = 0,
-             park_cash_in_index: pd.Series = None, apply_tax: bool = False) -> dict:
+             park_cash_in_index: pd.Series = None, apply_tax: bool = False,
+             max_positions: int = None, max_deployed_pct: float = None) -> dict:
     """
     資金を実際に回しながら日次でシミュレーションする。
+
+    max_positions: 同時に持てる銘柄数の上限。
+        片山晃は「予算100万円なら4銘柄程度」（本人は1〜2銘柄に集中）と書いている。
+    max_deployed_pct: 資金稼働率の上限（%）。
+        うねり取りは**50%以内**と明記している（常に半分以上を待機資金に残す。
+        「相場の予測は半分当たって半分外れるのが前提」という理由）。
+    どちらも None なら制限なし（従来どおり資金がある限り買う）。
     park_cash_in_index に日経平均の終値を渡すと、個別株を買っていない
     余剰資金を日経平均のETFで運用しているものとして日次で増減させる
     （「シグナルが出ていない間は現金」という構造的弱点への対処案の検証用）。
@@ -205,6 +213,14 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
                 candidates.sort(key=lambda x: x[0])
 
             for code, price, _ in candidates:
+                # 書籍由来の2つの上限。どちらかに達したらその日は打ち止め
+                if max_positions is not None and len(positions) >= max_positions:
+                    break
+                if max_deployed_pct is not None:
+                    invested = sum(p["cost_basis"] for p in positions.values())
+                    total = capital + invested
+                    if total > 0 and invested / total * 100 >= max_deployed_pct:
+                        break
                 # 個別株の購入コスト（買付手数料込み）
                 stock_outlay = price * LOT_SIZE * (1 + stock_cost_one_way)
                 cost = stock_outlay
