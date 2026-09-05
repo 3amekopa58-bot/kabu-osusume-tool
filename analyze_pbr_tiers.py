@@ -26,8 +26,13 @@ import pandas as pd
 BASE_DIR = Path(__file__).parent
 FIN_PATH = BASE_DIR / "data" / "edinet_financials_adjusted.json"
 SUSPICIOUS_RETURN_THRESHOLD = 500.0
-DEFAULT_TRADES = ("output/backtest_trades_timesl10d60_either_trend_marketadx_"
-                  "volume_rs_universe_max_20260830.csv")
+# ⚠️ 中間ファイルを名指しで固定すると、コードや母集団を変えたときに
+# 追随せず、古い成果物で測り続けることになる（2026-09-05に
+# analyze_targets.py と analyze_sectors.py で実際に起きた＝4.4-56）。
+# 現行ルールの正規のトレード明細を指す。無ければ次で作る:
+#   python3 backtest.py timesl either trend marketadx volume rs sl10 max \
+#           --tickers universe.csv
+DEFAULT_TRADES = BASE_DIR / "output" / "_universe_max_trades.csv"
 FORWARD_HORIZONS = (250, 500)
 
 TIERS = [(0, 0.3, "激安（0.3未満）"), (0.3, 0.4, "超割安（0.3-0.4）"),

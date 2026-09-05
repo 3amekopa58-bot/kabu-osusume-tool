@@ -24,8 +24,13 @@ import yfinance as yf
 BASE_DIR = Path(__file__).parent
 TICKERS_CSV = BASE_DIR / "tickers.csv"
 SECTOR_CACHE = BASE_DIR / "data" / "sectors.json"
-DEFAULT_TRADES = (BASE_DIR / "output" /
-                  "backtest_trades_timesl10d60_either_trend_marketadx_volume_rs_max_20260829.csv")
+# ⚠️ 中間ファイルを名指しで固定すると、コードや母集団を変えたときに
+# 追随せず、古い成果物で測り続けることになる（2026-09-05に
+# analyze_targets.py と analyze_sectors.py で実際に起きた＝4.4-56）。
+# 現行ルールの正規のトレード明細を指す。無ければ次で作る:
+#   python3 backtest.py timesl either trend marketadx volume rs sl10 max \
+#           --tickers universe.csv
+DEFAULT_TRADES = BASE_DIR / "output" / "_universe_max_trades.csv"
 
 # 異常値（分割データ不整合）を除外する閾値
 SUSPICIOUS_RETURN_THRESHOLD = 500.0

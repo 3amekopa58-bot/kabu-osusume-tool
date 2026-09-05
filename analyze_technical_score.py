@@ -35,8 +35,13 @@ SUSPICIOUS_RETURN_THRESHOLD = 500.0
 # 配点を変えて試すたびに待たなくて済むようにキャッシュする。
 # （株価から導いた中間データなのでコミットはしない＝.gitignore）
 CACHE_PATH = BASE_DIR / "data" / "technical_rows.csv"
-DEFAULT_TRADES = ("output/backtest_trades_timesl10d60_either_trend_marketadx_"
-                  "volume_rs_universe_max_20260830.csv")
+# ⚠️ 中間ファイルを名指しで固定すると、コードや母集団を変えたときに
+# 追随せず、古い成果物で測り続けることになる（2026-09-05に
+# analyze_targets.py と analyze_sectors.py で実際に起きた＝4.4-56）。
+# 現行ルールの正規のトレード明細を指す。無ければ次で作る:
+#   python3 backtest.py timesl either trend marketadx volume rs sl10 max \
+#           --tickers universe.csv
+DEFAULT_TRADES = BASE_DIR / "output" / "_universe_max_trades.csv"
 
 
 def row_at(hist: pd.DataFrame) -> dict:

@@ -15,7 +15,11 @@
   D) 固定+10.3%    … 現行の通知が使っている値（比較用のベースライン）
 
 使い方:
-    python analyze_targets.py [トレード明細CSV]
+    python3 analyze_targets.py [トレード明細CSV]
+      省略時は output/_universe_max_trades.csv（現行ルール・944銘柄・26年）。
+      無ければ次で作る:
+        python3 backtest.py timesl either trend marketadx volume rs sl10 max \
+                --tickers universe.csv
 """
 
 import sys
@@ -24,11 +28,19 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+from trade_data import load_trades
+
 from price_cache import fetch_histories
 
 BASE_DIR = Path(__file__).parent
-DEFAULT_TRADES = (BASE_DIR / "output" /
-                  "backtest_trades_timesl10d60_either_trend_marketadx_volume_rs_5y_20260829.csv")
+# ⚠️ 2026-09-05まで、ここは **日経225・5年・536件** の古いファイル
+# （backtest_trades_..._5y_20260829.csv）を指していた。
+# 一方 notify.py の TARGET_HIT_RATE_BANDS / DAYS_TO_TARGET_* は
+# **944銘柄ユニバース・26年**で取り直した値だったため、
+# REQUIREMENTS の「取り直し方」に従って `python3 analyze_targets.py` を
+# 実行すると、**古い母集団の数値が出て定数が退化する**状態だった。
+# 現行ルールの正規のトレード明細を既定にする（4.4-56）。
+DEFAULT_TRADES = BASE_DIR / "output" / "_universe_max_trades.csv"
 
 SUSPICIOUS_RETURN_THRESHOLD = 500.0
 SWING_LOOKBACK = 60      # 直近高値・スイング判定に使う期間
@@ -70,10 +82,9 @@ def targets_at(hist: pd.DataFrame, atr: pd.Series, i: int, entry: float) -> dict
 
 def main():
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_TRADES
-    df = pd.read_csv(path)
+    # 汚染データの検知つきで読む（4.4-48）。あり得ない値なら例外で止まる
+    df = load_trades(path)
     df = df[df["return_pct"].abs() <= SUSPICIOUS_RETURN_THRESHOLD]
-    df["entry_date"] = pd.to_datetime(df["entry_date"])
-    df["exit_date"] = pd.to_datetime(df["exit_date"])
 
     print(f"対象: {path.name} / {len(df)}トレード")
     print("各トレードについてエントリー時点の目標を計算し、保有期間中の高値が")
