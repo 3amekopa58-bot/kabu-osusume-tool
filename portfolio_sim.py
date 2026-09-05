@@ -118,7 +118,8 @@ def build_signals(hist: pd.DataFrame, nikkei_close: pd.Series) -> pd.DataFrame:
 def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
              calendar: pd.DatetimeIndex, rule: str, seed: int = 0,
              park_cash_in_index: pd.Series = None, apply_tax: bool = False,
-             max_positions: int = None, max_deployed_pct: float = None) -> dict:
+             max_positions: int = None, max_deployed_pct: float = None,
+             allow_add_on: int = 0) -> dict:
     """
     資金を実際に回しながら日次でシミュレーションする。
 
@@ -128,13 +129,22 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
         うねり取りは**50%以内**と明記している（常に半分以上を待機資金に残す。
         「相場の予測は半分当たって半分外れるのが前提」という理由）。
     どちらも None なら制限なし（従来どおり資金がある限り買う）。
+    allow_add_on: すでに保有している銘柄に何回まで買い増すか。
+        0（既定）＝買い増さない＝`backtest.py` と同じ「1銘柄1回」。
+        実運用では条件を満たし続ける銘柄が何日も推奨に出る（4.4-35で
+        実測30%）ので、そのとおり買い増した場合を測るためのもの。
+        999 を渡せば実質無制限。
     park_cash_in_index に日経平均の終値を渡すと、個別株を買っていない
     余剰資金を日経平均のETFで運用しているものとして日次で増減させる
     （「シグナルが出ていない間は現金」という構造的弱点への対処案の検証用）。
     """
     rng = random.Random(seed)
     capital = float(INITIAL_CAPITAL)
-    positions = {}   # code -> dict(entry_price, entry_date, shares)
+    # ロットID -> dict(code, entry_price, entry_date, shares, cost_basis)。
+    # 買い増さない場合は1銘柄1ロットしか存在しないので、キーがcodeだった
+    # 従来と挙動は完全に同じ（挿入順も保たれる）。
+    positions = {}
+    next_lot_id = 0
     trades = []
     equity_curve = []
     deployed_ratios = []
@@ -169,8 +179,9 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
             capital *= (1 + float(index_ret.get(day, 0.0)))
             capital *= (1 - ETF_EXPENSE_RATIO / TRADING_DAYS_PER_YEAR)
         # --- 1) 手仕舞い判定（保有60日 or 買値-10%） ---
-        for code in list(positions.keys()):
-            pos = positions[code]
+        for lot_id in list(positions.keys()):
+            pos = positions[lot_id]
+            code = pos["code"]
             df = sig_map[code]
             if day not in df.index:
                 continue
@@ -192,14 +203,17 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
                     "return_pct": loss_pct - COST_PCT,
                     "holding_days": held_days,
                 })
-                del positions[code]
+                del positions[lot_id]
 
         # --- 2) 新規エントリー（地合いが良い日のみ、予算の範囲で） ---
         regime_ok = bool(regime.get(day, False))
         if regime_ok:
             candidates = []
             for code, df in sig_map.items():
-                if code in positions or day not in df.index:
+                if day not in df.index:
+                    continue
+                held = sum(1 for p in positions.values() if p["code"] == code)
+                if held > allow_add_on:
                     continue
                 row = df.loc[day]
                 if bool(row["signal"]):
@@ -234,15 +248,17 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
                         realized_gain_this_year += cost * gain_ratio
                         etf_basis -= cost * (etf_basis / capital)
                     capital -= cost
-                    positions[code] = {
+                    positions[next_lot_id] = {
+                        "code": code,
                         "entry_price": price, "entry_date": day, "shares": LOT_SIZE,
                         "cost_basis": stock_outlay,
                     }
+                    next_lot_id += 1
 
         # --- 3) 時価評価 ---
         holdings_value = 0.0
-        for code, pos in positions.items():
-            df = sig_map[code]
+        for pos in positions.values():
+            df = sig_map[pos["code"]]
             if day in df.index:
                 holdings_value += float(df.at[day, "close"]) * pos["shares"]
             else:
