@@ -94,8 +94,10 @@ def compute_traits(o, h, l, c, v, nk) -> dict:
 
     # 分散比：k日リターンの分散 ÷ (k × 1日分散)
     k = 20
-    rk = np.log(c).diff(k).dropna()
-    vr = (rk.var() / (k * r.var())) if r.var() > 0 else np.nan
+    # 株価に0や欠損があると log が警告を出すので正の値だけで計算する
+    cp = c[c > 0]
+    rk = np.log(cp).diff(k).dropna() if len(cp) > k else pd.Series(dtype=float)
+    vr = (rk.var() / (k * r.var())) if (len(rk) > 10 and r.var() > 0) else np.nan
 
     # 20日線からの乖離の平均回帰の速さ
     ma20 = c.rolling(20).mean()
