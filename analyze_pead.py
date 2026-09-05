@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 
 from price_cache import fetch_histories
+from trade_data import load_trades
 
 BASE_DIR = Path(__file__).parent
 SUMMARY = BASE_DIR / "data" / "jquants_summary.json"
@@ -159,8 +160,7 @@ def within_rule(events: pd.DataFrame):
     if not path.exists():
         print(f"（{path.name} が無いので現行ルール内の検証はスキップ）")
         return
-    tr = pd.read_csv(path, encoding="utf-8-sig")
-    tr["entry_date"] = pd.to_datetime(tr["entry_date"])
+    tr = load_trades(path)
 
     by_code = {c: g.sort_values("date") for c, g in events.groupby("code")}
     out = []

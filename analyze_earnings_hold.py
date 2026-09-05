@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from price_cache import fetch_histories
+from trade_data import load_trades
 
 BASE_DIR = Path(__file__).parent
 SUMMARY = BASE_DIR / "data" / "jquants_summary.json"
@@ -79,9 +80,7 @@ def main():
         ds = sorted({r["DiscDate"] for r in data[code] if r.get("DiscDate")})
         discs[code] = pd.DatetimeIndex([pd.Timestamp(d) for d in ds])
 
-    tr = pd.read_csv(TRADES, encoding="utf-8-sig")
-    tr["entry_date"] = pd.to_datetime(tr["entry_date"])
-    tr["exit_date"] = pd.to_datetime(tr["exit_date"])
+    tr = load_trades(TRADES)
     tr = tr[tr["entry_date"] >= pd.Timestamp("2016-09-05")]
 
     rows = []
