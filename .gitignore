@@ -21,3 +21,6 @@ data/technical_rows.csv
 # EDINETから作った貸借対照表の履歴（build_netnet_history.py が作る）。
 # 公開情報だが8MBあり、再取得できる（約1時間）のでコミットしない
 data/netnet_history.json
+
+# 自己株買いイベント（EDINET由来・再取得可能。直近1年しか遡れない）
+data/buyback_events.json
