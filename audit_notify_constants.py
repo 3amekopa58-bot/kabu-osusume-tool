@@ -40,7 +40,7 @@ BASE_DIR = Path(__file__).parent
 MAIN = BASE_DIR / "output" / "_universe_max_trades.csv"
 # ADX条件を外したもの＝ ◇参考枠の出どころ
 NO_ADX = (BASE_DIR / "output" /
-          "backtest_trades_timesl10d60_either_trend_volume_rs_universe_max_20260903.csv")
+          "backtest_trades_timesl10d60_either_trend_volume_rs_universe_max_20260919.csv")
 
 TOL = 0.5   # この差までは「一致」とみなす（丸めや期間の伸びぶん）
 
