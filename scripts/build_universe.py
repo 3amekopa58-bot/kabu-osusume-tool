@@ -29,7 +29,7 @@ import pandas as pd
 import yfinance as yf
 
 BASE_DIR = Path(__file__).parent.parent
-ALL_TICKERS_JSON = Path("/tmp/all_listed_tickers.json")
+ALL_TICKERS_JSON = BASE_DIR / "data" / "all_listed_tickers.json"
 DEFAULT_OUTPUT = BASE_DIR / "universe.csv"
 
 BUDGET = 1_000_000
@@ -38,6 +38,12 @@ LOT_SIZE = 100
 # 1単元（数十万円）が1日の売買代金の1%未満に収まる目安として1億円とした。
 MIN_DAILY_TURNOVER = 100_000_000
 MIN_DAYS = 120                  # スクリーニングに必要な最低営業日数
+# ⚠️ 2026-09-19: period="6mo" は約126営業日しか返らず、MIN_DAYS との差が
+# わずか6日だった。レート制限で少し切り詰められるだけで120日を割り、
+# 「データ不足」という正常に見える分類に落ちてキユーピー等が消えた。
+# period を1年に広げたうえで、バッチの中で極端に短い応答は
+# 「基準を満たさない」ではなく「取れていない」として再取得に回す。
+TRUNCATED_RATIO = 0.5           # バッチ中央値のこの割合未満なら切り詰められた応答とみなす
 MAX_PLAUSIBLE_DAILY_MOVE = 0.8  # 1日で±80%超は分割データ不整合の疑い
 BATCH_SIZE = 100                # 200だとレート制限に当たりやすい（2026-09-13）
 BATCH_WAIT_SEC = 1.0            # バッチ間で一息入れる
@@ -45,6 +51,23 @@ RETRY_WAIT_SEC = 20             # レート制限に当たったときの待ち�
 RETRY_BATCH_SIZE = 20           # 拾い直しは小分けにする
 MAX_ALLOWED_FAILURES = 30       # これを超えたら書き出さずに中止する
 MAX_DROP_RATIO_PCT = 5          # 前回のユニバースからの脱落がこの割合を超えたら中止
+
+
+def _batch_median_len(data, batch) -> float:
+    """このバッチが返してきた営業日数の中央値。切り詰め検出の物差しに使う。"""
+    lens = []
+    for code in batch:
+        try:
+            d = data[code] if len(batch) > 1 else data
+            n = len(d.dropna(subset=["Close"]))
+            if n:
+                lens.append(n)
+        except Exception:
+            pass
+    if not lens:
+        return 0.0
+    lens.sort()
+    return float(lens[len(lens) // 2])
 
 
 def main():
@@ -57,7 +80,7 @@ def main():
     listed = json.loads(ALL_TICKERS_JSON.read_text(encoding="utf-8"))
     codes = [t["code"] for t in listed]
     names = {t["code"]: t["name"] for t in listed}
-    print(f"上場{len(codes)}銘柄について、直近6ヶ月の株価を一括取得します…")
+    print(f"上場{len(codes)}銘柄について、直近1年の株価を一括取得します…")
 
     kept, stats = [], {"データ不足": 0, "予算オーバー": 0, "流動性不足": 0,
                        "データ汚染": 0, "取得失敗": 0}
@@ -67,7 +90,7 @@ def main():
         """レート制限に当たったら待って数回やり直す"""
         for attempt in range(tries):
             try:
-                return yf.download(batch, period="6mo", group_by="ticker",
+                return yf.download(batch, period="1y", group_by="ticker",
                                    auto_adjust=True, progress=False,
                                    threads=True)
             except Exception as e:
@@ -90,12 +113,22 @@ def main():
             continue
         time.sleep(BATCH_WAIT_SEC)   # レート制限を避けるため一息入れる
 
+        # このバッチが「どれくらいの長さで返ってきたか」の目安。
+        # 個々の銘柄がこれより極端に短ければ、基準割れではなく切り詰め。
+        med = _batch_median_len(data, batch)
+
         for code in batch:
             try:
                 d = data[code] if len(batch) > 1 else data
                 d = d.dropna(subset=["Close"])
                 if len(d) == 0:
                     # 1行も無いのは「基準を満たさない」ではなく「取れていない」
+                    failed.append(code)
+                    stats["取得失敗"] += 1
+                    continue
+                if med and len(d) < med * TRUNCATED_RATIO:
+                    # バッチの他銘柄より極端に短い＝取れていない。
+                    # 「データ不足」に混ぜると気づけないので再取得へ回す
                     failed.append(code)
                     stats["取得失敗"] += 1
                     continue
@@ -173,10 +206,19 @@ def main():
     # 場合（120日ぶん要るのに30日しか来ない等）は「データ不足」に見えるので
     # 素通りしてしまう。前回入っていた銘柄が急に大量に落ちるのは、
     # 基準を満たさなくなったのではなく**取れていない**可能性が高い。
-    if out_path.exists():
+    #
+    # ⚠️ 2026-09-19: 比較元を out_path にしていたため、出力先を新しいパスに
+    # 変えて試すと `out_path.exists()` が False になり、**このガードごと
+    # スキップされていた**。安全確認のつもりで別ファイルに書く操作が
+    # 保護を外す、という逆向きの作りだった。比較元は常に本番の
+    # universe.csv に固定する。
+    baseline = DEFAULT_OUTPUT
+    if baseline.exists():
         import csv as _csv
-        with out_path.open(encoding="utf-8-sig") as f:
-            prev = {r["code"] for r in _csv.DictReader(f)}
+        with baseline.open(encoding="utf-8-sig") as f:
+            _rows = list(_csv.DictReader(f))
+        prev = {r["code"] for r in _rows}
+        prev_name = {r["code"]: r.get("name", "") for r in _rows}
         now = {k["code"] for k in kept}
         dropped = prev - now
         ratio = len(dropped) / len(prev) * 100 if prev else 0
@@ -189,6 +231,15 @@ def main():
             print("   株価や流動性が実際に変わったのか、単に取得できて")
             print("   いないだけなのかを確かめてください。**中止します。**")
             print(f"   脱落した銘柄の例: {sorted(dropped)[:15]}")
+            # ⚠️ 2026-09-19: 中止すると1時間かけた取得結果が丸ごと消え、
+            # 調べ直すのにまた1時間かかっていた。**中止＝本番に書かない**
+            # であって、捨てる必要はない。調査用に退避しておく。
+            rej = out_path.with_suffix(".rejected.csv")
+            pd.DataFrame(kept).to_csv(rej, index=False, encoding="utf-8-sig")
+            (rej.with_name(rej.stem + "_dropped.txt")).write_text(
+                "\n".join(f"{c},{prev_name.get(c, '')}" for c in sorted(dropped)),
+                encoding="utf-8")
+            print(f"   → 調査用に退避: {rej.name} / {rej.stem}_dropped.txt")
             return
 
     # ⚠️ **失敗が多いまま書き出さない。**
@@ -203,6 +254,9 @@ def main():
         print("   黙って脱落します。**書き込みを中止します。**")
         print("   時間をおいて再実行してください。")
         print(f"   失敗した銘柄の例: {failed[:15]}")
+        rej = out_path.with_suffix(".rejected.csv")
+        pd.DataFrame(kept).to_csv(rej, index=False, encoding="utf-8-sig")
+        print(f"   → 調査用に退避: {rej.name}")
         return
 
     df = pd.DataFrame(kept).sort_values("turnover_oku", ascending=False)

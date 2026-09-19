@@ -24,7 +24,7 @@ from pathlib import Path
 import yfinance as yf
 
 ROOT = Path(__file__).parent.parent
-TICKERS_PATH = Path("/tmp/all_listed_tickers.json")
+TICKERS_PATH = Path(__file__).resolve().parent.parent / "data" / "all_listed_tickers.json"
 PROGRESS_PATH = Path("/tmp/kabu1000_full_market_stage1_progress.json")
 CANDIDATES_PATH = Path("/tmp/kabu1000_full_market_stage1_candidates.json")
 

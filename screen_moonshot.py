@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np, pandas as pd, yfinance as yf
 
 B = Path(__file__).parent
-TICKERS = Path("/tmp/all_listed_tickers.json")
+TICKERS = B / "data" / "all_listed_tickers.json"
 OUT = B / "output" / "moonshot_candidates.csv"
 
 # 実測した10倍株の中央値を基準にする（4.4-59）

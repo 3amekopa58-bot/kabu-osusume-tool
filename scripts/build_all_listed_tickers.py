@@ -1,6 +1,9 @@
 """
 東証上場全銘柄のティッカー一覧を、EDINETコード一覧（Edinetcode.zip）から
-作成し、/tmp/all_listed_tickers.json に保存する。
+作成し、data/all_listed_tickers.json に保存する。
+
+⚠️ 2026-09-19: 以前は /tmp に置いていたが OS に消され、
+   ユニバース再構築がその場で止まった。土台になるファイルは /tmp に置かない。
 
 screen_full_market_stage1.py・stage2.py の前段として実行する（全市場版の
 かぶ1000流スクリーニング用。tickers.csvの225銘柄とは別の、より広い探索用）。
@@ -19,7 +22,7 @@ import requests
 
 EDINET_CODELIST_URL = "https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip"
 CODELIST_LOCAL_DIR = Path("/tmp/edinetcodelist")
-OUTPUT_PATH = Path("/tmp/all_listed_tickers.json")
+OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data" / "all_listed_tickers.json"
 
 
 def main():
