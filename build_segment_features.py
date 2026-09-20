@@ -26,7 +26,56 @@ TRADES = B / "output" / "_universe_max_trades.csv"
 #    （EDINETのAPIは約10年ローリングだが、有報の「主要な経営指標等の推移」に
 #      5年分の過去数値が載るため、最古の有報から2012年頃まで遡れる）
 FUND = B / "data" / "edinet_financials.json"
+# 実際の開示日（決算短信）。EDINET側の available_from は period_end+92日の
+# 合成値で、実際は中央値41日・0.9%が92日超だった（4.4-66）。
+# こちらがあれば差し替える。⚠️ J-Quants のデータは規約上コミット禁止。
+JQ = B / "data" / "jquants_summary.json"
 OUT = B / "output" / "segment_features.csv"
+
+
+def load_disclosure_dates() -> dict:
+    """(銘柄, 決算期末) → 実際の開示日（決算短信の発表日）。
+
+    ⚠️ 値そのものは EDINET の有報（確定値）、開示日は短信のもの、という
+       組み合わせになる。短信の速報値と有報の確定値はほぼ一致するが、
+       修正が入った場合はそのぶん先読みになる。
+       それでも period_end+92日 の合成値より実態に近い（4.4-69）。
+    """
+    if not JQ.exists():
+        return {}
+    raw = json.loads(JQ.read_text(encoding="utf-8"))["data"]
+    out = {}
+    for code, recs in raw.items():
+        for r in recs:
+            if r.get("CurPerType") != "FY":
+                continue
+            d, e = r.get("DiscDate"), r.get("CurFYEn")
+            if not (d and e):
+                continue
+            dd, ee = pd.Timestamp(d), pd.Timestamp(e)
+            if dd < ee:          # 期末前＝通期予想の行。実際の開示ではない
+                continue
+            k = (code, ee.date())
+            if k not in out or dd < out[k]:
+                out[k] = dd
+    return out
+
+
+def available_at(rec: dict, disc: dict, code: str) -> pd.Timestamp:
+    """その決算が実際に使えるようになった日。
+
+    実開示日があればそれを使い、無ければ EDINET の合成値（+92日）に戻す。
+    決算期末の記録が数日ずれることがあるので前後10日を許容する。
+    """
+    pe = rec.get("period_end")
+    if pe:
+        base = pd.Timestamp(pe).date()
+        for off in range(0, 11):
+            for sign in (1, -1):
+                k = (code, base + pd.Timedelta(days=off * sign))
+                if k in disc:
+                    return disc[k]
+    return pd.Timestamp(rec["available_from"])
 
 
 def fundamentals_asof(hist, when: pd.Timestamp) -> dict:
@@ -42,6 +91,15 @@ def fundamentals_asof(hist, when: pd.Timestamp) -> dict:
     return ok[-1] if ok else {}
 
 
+def fundamentals_asof_real(hist, when: pd.Timestamp, disc: dict, code: str) -> dict:
+    """実開示日ベースで、when 時点で開示済みの最新決算を返す。"""
+    items = sorted(hist.values(), key=lambda x: x.get("period_end") or "") \
+        if isinstance(hist, dict) else list(hist)
+    ok = [h for h in items
+          if h.get("available_from") and available_at(h, disc, code) <= when]
+    return ok[-1] if ok else {}
+
+
 def main() -> None:
     d = pd.read_csv(TRADES)
     d["entry_date"] = pd.to_datetime(d["entry_date"])
@@ -50,6 +108,8 @@ def main() -> None:
     hist = fetch_histories(codes, period="max")
 
     fund = json.loads(FUND.read_text(encoding="utf-8"))["data"]
+    disc = load_disclosure_dates()
+    print(f"実際の開示日: {len(disc):,}件（無ければ period_end+92日に戻す）")
 
     # 相場環境（日経のADX>20 かつ 100日線上）。全トレード共通なので先に1本作る
     regime = bt.fetch_market_regime_adx(period="max")
@@ -76,7 +136,7 @@ def main() -> None:
                 continue
             p = past[-1]
             px = float(close.loc[p])
-            f = fundamentals_asof(fh, e)
+            f = fundamentals_asof_real(fh, e, disc, code)
             shares = f.get("shares")
             bps, eps = f.get("bps"), f.get("eps")
             r = {

@@ -9,6 +9,9 @@
   ③ 他の交絡で説明できないか（時価総額・業種・流動性で層別）
   ④ 効果がノイズ幅を超えているか（ブートストラップ）
 
+⚠️ **比較は中央値で行う（4.4-65）。** 平均だと 8105.T(+1,189%) の1件で
+   「小型株では割安が不利」という逆の結論が出る。平均は参考として併記。
+
 使い方: ./venv/bin/python verify_pbr.py
 """
 import json
@@ -51,7 +54,7 @@ def main() -> None:
 
     # ① 期間の切り方への頑健性 -------------------------------------
     print("=" * 66)
-    print("① 期間の切り方を変える（Q1−Q4 の差。プラスなら割安が有利）")
+    print("① 期間の切り方を変える（Q1−Q4 の差＝中央値。プラスなら割安が有利）")
     print("=" * 66)
     splits = {
         "3分割 13-17/18-21/22-26": [(2013, 2017), (2018, 2021), (2022, 2026)],
@@ -66,27 +69,27 @@ def main() -> None:
             s = m[(m["年"] >= a) & (m["年"] <= b)]
             if len(s) < 100:
                 out.append("件数不足"); continue
-            g = s.groupby(q4(s), observed=True)["return_pct"].mean()
+            g = s.groupby(q4(s), observed=True)["return_pct"].median()
             out.append(f"{g.get('Q1', np.nan) - g.get('Q4', np.nan):+.2f}")
         print(f"  {name:<32} {' / '.join(out)}")
 
     # ② 各期間の中での単調性 ---------------------------------------
     print("\n" + "=" * 66)
-    print("② 各期間の中でも単調か（全期間でならしただけではないか）")
+    print("② 各期間の中でも単調か（中央値。全期間でならしただけではないか）")
     print("=" * 66)
     for lab, a, b in [("F1 2013-2017", 2013, 2017), ("F2 2018-2021", 2018, 2021),
                       ("F3 2022-2026", 2022, 2026)]:
         s = m[(m["年"] >= a) & (m["年"] <= b)]
-        g = s.groupby(q4(s), observed=True)["return_pct"].agg(["mean", "size"])
-        v = list(g["mean"])
+        g = s.groupby(q4(s), observed=True)["return_pct"].agg(["median", "size"])
+        v = list(g["median"])
         mono = "単調" if all(x > y for x, y in zip(v, v[1:])) else "**単調でない**"
         print(f"  {lab}: " + " / ".join(f"{q}{x:+.2f}({n})" for q, x, n
-                                        in zip(g.index, g["mean"], g["size"]))
+                                        in zip(g.index, g["median"], g["size"]))
               + f"  → {mono}")
 
     # ③ 他の交絡で層別 ---------------------------------------------
     print("\n" + "=" * 66)
-    print("③ 他の交絡で層別しても残るか（各層での Q1−Q4）")
+    print("③ 他の交絡で層別しても残るか（各層での Q1−Q4＝中央値）")
     print("=" * 66)
     for col, label in [("時価総額億", "時価総額"), ("売買代金億", "売買代金"),
                        ("ボラ%", "ボラティリティ")]:
@@ -98,7 +101,7 @@ def main() -> None:
         for lv, g in sub.groupby("層", observed=True):
             if len(g) < 100:
                 parts.append(f"{lv}:件数不足"); continue
-            q = g.groupby(q4(g), observed=True)["return_pct"].mean()
+            q = g.groupby(q4(g), observed=True)["return_pct"].median()
             parts.append(f"{lv}:{q.get('Q1', np.nan) - q.get('Q4', np.nan):+.2f}")
         print(f"  {label}で層別  " + " / ".join(parts))
 
@@ -106,7 +109,7 @@ def main() -> None:
     for s_, g in m.groupby("業種"):
         if len(g) < 300:
             continue
-        q = g.groupby(q4(g), observed=True)["return_pct"].mean()
+        q = g.groupby(q4(g), observed=True)["return_pct"].median()
         print(f"    {s_:<22} {q.get('Q1', np.nan) - q.get('Q4', np.nan):+6.2f}pt "
               f"({len(g)}件)")
 
@@ -116,16 +119,16 @@ def main() -> None:
     print("=" * 66)
     a_ = m[m["PBR帯4"] == "Q1"]["return_pct"].values
     b_ = m[m["PBR帯4"] == "Q4"]["return_pct"].values
-    obs = a_.mean() - b_.mean()
-    diffs = [rng.choice(a_, len(a_), True).mean() - rng.choice(b_, len(b_), True).mean()
-             for _ in range(2000)]
+    obs = np.median(a_) - np.median(b_)
+    diffs = [np.median(rng.choice(a_, len(a_), True)) -
+             np.median(rng.choice(b_, len(b_), True)) for _ in range(2000)]
     lo, hi = np.percentile(diffs, [2.5, 97.5])
     # 帰無分布：ラベルをシャッフルして同じ差を作る
     pool = np.concatenate([a_, b_])
     null = []
     for _ in range(2000):
         p = rng.permutation(pool)
-        null.append(p[:len(a_)].mean() - p[len(a_):].mean())
+        null.append(np.median(p[:len(a_)]) - np.median(p[len(a_):]))
     pval = (np.abs(null) >= abs(obs)).mean()
     print(f"  Q1−Q4 の実測差: {obs:+.2f}pt")
     print(f"  95%信頼区間: {lo:+.2f} 〜 {hi:+.2f}pt")
