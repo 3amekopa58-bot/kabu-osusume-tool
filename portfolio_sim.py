@@ -115,11 +115,65 @@ def build_signals(hist: pd.DataFrame, nikkei_close: pd.Series) -> pd.DataFrame:
     })
 
 
+def _bps_asof(recs, day):
+    """その日までに**開示済み**の最新BPS。無ければNone（＝フィルターを通す）。"""
+    if not recs:
+        return None
+    ok = [b for a, b in recs if a <= day and b and b > 0]
+    return ok[-1] if ok else None
+
+
+def load_bps_map() -> dict:
+    """{銘柄: [(開示日, BPS), ...]} を作る。開示日は実開示日を優先（4.4-69）。"""
+    import json
+    fin_p = BASE_DIR / "data" / "edinet_financials.json"
+    if not fin_p.exists():
+        return {}
+    fin = json.loads(fin_p.read_text(encoding="utf-8"))["data"]
+    disc = {}
+    jq_p = BASE_DIR / "data" / "jquants_summary.json"
+    if jq_p.exists():
+        for code, recs in json.loads(jq_p.read_text(encoding="utf-8"))["data"].items():
+            for r in recs:
+                if r.get("CurPerType") != "FY":
+                    continue
+                d, e = r.get("DiscDate"), r.get("CurFYEn")
+                if not (d and e):
+                    continue
+                dd, ee = pd.Timestamp(d), pd.Timestamp(e)
+                if dd >= ee:
+                    disc.setdefault((code, ee.date()), dd)
+    out = {}
+    for code, hist in fin.items():
+        rows = []
+        for v in sorted(hist.values(), key=lambda x: x.get("period_end") or ""):
+            if not v.get("bps") or not v.get("available_from"):
+                continue
+            av = pd.Timestamp(v["available_from"])
+            pe = v.get("period_end")
+            if pe:
+                base = pd.Timestamp(pe).date()
+                for off in range(0, 11):
+                    for sg in (1, -1):
+                        k = (code, base + pd.Timedelta(days=off * sg))
+                        if k in disc:
+                            av = disc[k]
+                            break
+                    else:
+                        continue
+                    break
+            rows.append((av, float(v["bps"])))
+        if rows:
+            out[code] = sorted(rows)
+    return out
+
+
 def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
              calendar: pd.DatetimeIndex, rule: str, seed: int = 0,
              park_cash_in_index: pd.Series = None, apply_tax: bool = False,
              max_positions: int = None, max_deployed_pct: float = None,
-             allow_add_on: int = 0) -> dict:
+             allow_add_on: int = 0, max_pbr: float = None,
+             bps_map: dict = None) -> dict:
     """
     資金を実際に回しながら日次でシミュレーションする。
 
@@ -217,6 +271,15 @@ def simulate(sig_map: dict, name_map: dict, regime: pd.Series,
                     continue
                 row = df.loc[day]
                 if bool(row["signal"]):
+                    # PBRフィルター（4.4-71）。エントリー日時点で開示済みの
+                    # 決算から作った値のみ使う＝先読みしない。
+                    # ⚠️ PBRが取れない銘柄は**除外せず通す**。過去データの
+                    #    欠損であって、実運用（screen.pyはinfoから取得）では
+                    #    ほぼ起きない。除外すると欠損の偏りが結果に混ざる。
+                    if max_pbr is not None and bps_map:
+                        bps = _bps_asof(bps_map.get(code), day)
+                        if bps and float(row["close"]) / bps >= max_pbr:
+                            continue
                     candidates.append((code, float(row["close"]),
                                        float(row["volume_ratio"] or 0)))
             if rule == "volume":
