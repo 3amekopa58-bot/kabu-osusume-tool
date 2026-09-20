@@ -1,5 +1,14 @@
 """区分を総当たりで検証し、偶然で説明できないものだけを残す。
 
+⚠️ **比較は中央値で行う（平均ではない）。**
+   このルールのリターン分布は裾が極端に重く、19,150件の平均+3.43%に対し
+   中央値は+0.43%しかない。8105.T の1トレード（+1,189%）だけで
+   平均が+0.06pt動く。実際 2026-09-20 に、区分の比較を平均でやったせいで
+   「小型株では割安が不利（-4.37pt）」という**逆の結論**が出た。
+   その正体はこの1トレードで、中央値では+2.43ptだった（4.4-65）。
+   平均は参考として表示するが、判定には使わない。
+
+
 ⚠️ **この道具の主目的は「良い区分を見つけること」ではなく、
    「見つけたつもりになるのを防ぐこと」。**
    区分を何十通りも切れば、26年のデータでも偶然で必ずいくつか当たる。
@@ -95,17 +104,18 @@ def evaluate(d: pd.DataFrame, col: str) -> pd.DataFrame:
     # 取れていない行を混ぜると「全体平均」が別物になり比較にならない。
     if col in FUND_COLS:
         d = d[d[col].notna()]
-    base = {lab: d[(d["年"] >= a) & (d["年"] <= b)]["return_pct"].mean()
+    base = {lab: d[(d["年"] >= a) & (d["年"] <= b)]["return_pct"].median()
             for lab, a, b in P}
-    base_all = d["return_pct"].mean()
+    base_all = d["return_pct"].median()
 
     rows = []
     for name, g in d.groupby(col, observed=True):
         if len(g) < MIN_TRADES:
             continue
         r = {"区分": col, "バケツ": name, "件数": len(g),
-             "平均%": g["return_pct"].mean(), "勝率%": (g["return_pct"] > 0).mean() * 100,
-             "PF": pf(g["return_pct"]), "全体との差": g["return_pct"].mean() - base_all}
+             "中央値%": g["return_pct"].median(), "平均%": g["return_pct"].mean(),
+             "勝率%": (g["return_pct"] > 0).mean() * 100,
+             "PF": pf(g["return_pct"]), "全体との差": g["return_pct"].median() - base_all}
         ok_up = ok_dn = True
         enough = True
         for lab, a, b in P:
@@ -114,7 +124,7 @@ def evaluate(d: pd.DataFrame, col: str) -> pd.DataFrame:
                 enough = False
                 r[lab] = np.nan
                 continue
-            diff = s.mean() - base[lab]
+            diff = s.median() - base[lab]
             r[lab] = diff
             ok_up &= diff > 0
             ok_dn &= diff < 0
@@ -141,7 +151,7 @@ def monotonic_p(t: pd.DataFrame, col: str) -> float:
     if not all("_Q" in n for n in names) or len(names) < 3:
         return float("nan")
     order = sorted(range(len(names)), key=lambda i: int(names[i].split("_Q")[1]))
-    vals = [t["平均%"].iloc[i] for i in order]
+    vals = [t["中央値%"].iloc[i] for i in order]
     up = all(a < b for a, b in zip(vals, vals[1:]))
     dn = all(a > b for a, b in zip(vals, vals[1:]))
     if not (up or dn):
@@ -181,7 +191,7 @@ def control_for_price(d: pd.DataFrame, col: str) -> None:
                   labels=["〜500円", "500-1000", "1000-2000", "2000円〜"])
     t = d.assign(価格帯=band).pivot_table(
         index="価格帯", columns=col, values="return_pct",
-        aggfunc="mean", observed=True)
+        aggfunc="median", observed=True)
     if t.shape[1] < 2:
         return
     first, last = t.columns[0], t.columns[-1]
@@ -222,8 +232,10 @@ def main() -> None:
         cands = [c for c in cands if c == want] or [want]
 
     print(f"トレード {len(d):,}件 / 検証する区分 {len(cands)}個: {cands}\n")
-    print(f"全体の平均リターン {d['return_pct'].mean():+.2f}% / "
-          f"勝率 {(d['return_pct']>0).mean()*100:.1f}% / PF {pf(d['return_pct']):.2f}\n")
+    print(f"全体：中央値 {d['return_pct'].median():+.2f}% / "
+          f"平均 {d['return_pct'].mean():+.2f}% / "
+          f"勝率 {(d['return_pct']>0).mean()*100:.1f}% / PF {pf(d['return_pct']):.2f}")
+    print("※判定は**中央値**で行う（平均は少数の大勝ちに支配されるため）\n")
 
     all_t, survivors = [], []
     for c in cands:
@@ -246,7 +258,7 @@ def main() -> None:
             print(f"  ⭐ バケツが**単調**に並んでいる（偶然にこうなる確率 {mp*100:.1f}%）"
                   f"＝個数の一致より強い証拠")
         show = t.sort_values("全体との差", ascending=False)
-        cols = ["バケツ", "件数", "平均%", "勝率%", "PF", "全体との差",
+        cols = ["バケツ", "件数", "中央値%", "平均%", "勝率%", "PF", "全体との差",
                 "3期間とも上", "3期間とも下"]
         print(show[cols].to_string(index=False, float_format="%.2f"))
         print()
