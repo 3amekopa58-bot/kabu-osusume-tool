@@ -20,13 +20,24 @@ from price_cache import fetch_histories
 
 B = Path(__file__).resolve().parent
 TRADES = B / "output" / "_universe_max_trades.csv"
-FUND = B / "data" / "fundamental_history.json"
+# ⚠️ fundamental_history.json は2021年9月以降しか無く、1期間しか作れない
+#    ＝採用基準の3期間検証が成立しない（4.4-63）。edinet_financials.json は
+#    2013年2月から14年分あるので、こちらを使う。
+#    （EDINETのAPIは約10年ローリングだが、有報の「主要な経営指標等の推移」に
+#      5年分の過去数値が載るため、最古の有報から2012年頃まで遡れる）
+FUND = B / "data" / "edinet_financials.json"
 OUT = B / "output" / "segment_features.csv"
 
 
-def fundamentals_asof(hist: list, when: pd.Timestamp) -> dict:
-    """when 時点で**開示済み**の最新決算を返す（先読み防止）。"""
-    ok = [h for h in hist
+def fundamentals_asof(hist, when: pd.Timestamp) -> dict:
+    """when 時点で**開示済み**の最新決算を返す（先読み防止）。
+
+    edinet_financials.json は {決算期: {...}} の辞書、
+    fundamental_history.json は [{...}] のリスト。どちらでも動くようにする。
+    """
+    items = sorted(hist.values(), key=lambda x: x.get("period_end") or "") \
+        if isinstance(hist, dict) else list(hist)
+    ok = [h for h in items
           if h.get("available_from") and pd.Timestamp(h["available_from"]) <= when]
     return ok[-1] if ok else {}
 
@@ -55,7 +66,7 @@ def main() -> None:
         sma200 = close.rolling(200).mean()
         vol20 = close.pct_change().rolling(20).std() * 100
         tv20 = (close * h["Volume"]).rolling(20).mean() / 1e8
-        fh = fund.get(code, [])
+        fh = fund.get(code) or []
 
         for _, t in g.iterrows():
             e = t["entry_date"]

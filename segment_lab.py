@@ -32,9 +32,25 @@ TRADES = B / "output" / "_universe_max_trades.csv"
 FEATURES = B / "output" / "segment_features.csv"   # build_segment_features.py が作る
 SECTORS = B / "data" / "sectors.json"
 
-PERIODS = [("第1期 2000-2008", 2000, 2008),
-           ("第2期 2009-2017", 2009, 2017),
-           ("第3期 2018-2026", 2018, 2026)]
+# 株価だけで作れる区分は26年を3等分できる
+PERIODS_PRICE = [("第1期 2000-2008", 2000, 2008),
+                 ("第2期 2009-2017", 2009, 2017),
+                 ("第3期 2018-2026", 2018, 2026)]
+
+# ⚠️ ファンダメンタルは2013年より前が存在しない（EDINETのAPIが約10年
+#    ローリング＋有報の5年表で2012年頃が限界）。26年で3分割すると
+#    第1期・第2期が空になり**判定不能**になるので、データのある範囲を
+#    3等分する。期間は短くなるが、3つとも本物の期間外検証になる（4.4-64）。
+PERIODS_FUND = [("F1期 2013-2017", 2013, 2017),
+                ("F2期 2018-2021", 2018, 2021),
+                ("F3期 2022-2026", 2022, 2026)]
+
+# ファンダメンタル由来＝短い期間を使う区分
+FUND_COLS = {"時価総額帯", "PBR帯", "PER帯"}
+
+
+def periods_for(col: str):
+    return PERIODS_FUND if col in FUND_COLS else PERIODS_PRICE
 MIN_TRADES = 120          # 1バケツ・1期間あたりの最低件数
 MIN_TRADES_PERIOD = 30    # 各期間での最低件数
 
@@ -70,9 +86,17 @@ def load() -> pd.DataFrame:
 
 
 def evaluate(d: pd.DataFrame, col: str) -> pd.DataFrame:
-    """1つの区分について、バケツごとの成績を3期間ぶん出す。"""
+    """1つの区分について、バケツごとの成績を3期間ぶん出す。
+
+    期間の定義は区分によって違う（ファンダは2013年以降しか無いため）。
+    """
+    P = periods_for(col)
+    # ファンダ区分は、その値が取れているトレードだけを母集団にする。
+    # 取れていない行を混ぜると「全体平均」が別物になり比較にならない。
+    if col in FUND_COLS:
+        d = d[d[col].notna()]
     base = {lab: d[(d["年"] >= a) & (d["年"] <= b)]["return_pct"].mean()
-            for lab, a, b in PERIODS}
+            for lab, a, b in P}
     base_all = d["return_pct"].mean()
 
     rows = []
@@ -84,7 +108,7 @@ def evaluate(d: pd.DataFrame, col: str) -> pd.DataFrame:
              "PF": pf(g["return_pct"]), "全体との差": g["return_pct"].mean() - base_all}
         ok_up = ok_dn = True
         enough = True
-        for lab, a, b in PERIODS:
+        for lab, a, b in P:
             s = g[(g["年"] >= a) & (g["年"] <= b)]["return_pct"]
             if len(s) < MIN_TRADES_PERIOD:
                 enough = False
@@ -94,6 +118,7 @@ def evaluate(d: pd.DataFrame, col: str) -> pd.DataFrame:
             r[lab] = diff
             ok_up &= diff > 0
             ok_dn &= diff < 0
+        r["期間定義"] = "／".join(lab for lab, _, _ in P)
         r["3期間とも上"] = bool(enough and ok_up)
         r["3期間とも下"] = bool(enough and ok_dn)
         r["判定可"] = enough
@@ -124,7 +149,7 @@ def monotonic_p(t: pd.DataFrame, col: str) -> float:
     return 2 / math.factorial(len(vals))
 
 
-def chance_expectation(t: pd.DataFrame) -> tuple:
+def chance_expectation(t: pd.DataFrame, col: str = "") -> tuple:
     """偶然でいくつ通過するかの期待個数。
 
     各期間で「全体平均を上回るバケツ」の実測割合を p_i とし、
@@ -133,7 +158,7 @@ def chance_expectation(t: pd.DataFrame) -> tuple:
     t = t[t["判定可"]]
     if len(t) == 0:
         return 0.0, 0.0, 0
-    ps = [(t[lab] > 0).mean() for lab, _, _ in PERIODS]
+    ps = [(t[lab] > 0).mean() for lab, _, _ in periods_for(col)]
     n = len(t)
     return n * np.prod(ps), n * np.prod([1 - p for p in ps]), n
 
@@ -167,11 +192,23 @@ def control_for_price(d: pd.DataFrame, col: str) -> None:
             gap = t.loc[b, first] - t.loc[b, last]
             diffs.append(gap)
             print(f"    {b}: {gap:+.2f}pt")
-    if len(diffs) >= 3 and (diffs[0] * diffs[-1] < 0 or abs(diffs[-1]) < abs(diffs[0]) / 2):
-        print("    → **効果が価格帯とともに縮む／反転する＝低位株の言い換え。"
-              "独立した効果ではない（4.4-49）。不採用。**")
+    # ⚠️ 判定は**向き**を見る。低位株の後知恵（4.4-49）の特徴は
+    #    「最も安い帯で効果が最大、価格が上がるにつれ縮む／反転する」。
+    #    逆に安い帯で効果が無く高い帯で強いなら、それは低位株の言い換えではない。
+    #    符号が反転したというだけで不採用にしない（2026-09-20に踏んだ誤判定）。
+    if len(diffs) < 3:
+        print("    → 層が足りず判定できない")
+        return
+    biggest_is_cheapest = abs(diffs[0]) >= max(abs(x) for x in diffs) - 1e-9
+    decays = abs(diffs[-1]) < abs(diffs[0]) / 2 or diffs[0] * diffs[-1] < 0
+    if biggest_is_cheapest and decays:
+        print("    → **最も安い帯で効果が最大、価格とともに縮む／反転する"
+              "＝低位株の言い換え。独立した効果ではない（4.4-49）。不採用。**")
+    elif biggest_is_cheapest:
+        print("    → 安い帯で最大だが減衰は弱い。低位株との重なりを要確認。")
     else:
-        print("    → 価格帯によらず効果が残る＝低位株の言い換えではない。要追加検証。")
+        print("    → **安い帯で最大ではない＝低位株の言い換えではない。**"
+              "この交絡では否定できない＝追加検証に進む価値あり。")
 
 
 def main() -> None:
@@ -194,12 +231,14 @@ def main() -> None:
         if len(t) == 0:
             print(f"--- {c}: 件数不足で判定できず ---\n")
             continue
-        exp_up, exp_dn, n = chance_expectation(t)
+        exp_up, exp_dn, n = chance_expectation(t, c)
         up = t["3期間とも上"].sum()
         dn = t["3期間とも下"].sum()
         verdict = ("**偶然を上回る**" if up > exp_up + 1 or dn > exp_dn + 1
                    else "偶然の範囲")
-        print(f"--- {c}（判定可 {n}バケツ）---")
+        P = periods_for(c)
+        print(f"--- {c}（判定可 {n}バケツ／期間 "
+              f"{'／'.join(lab for lab, _, _ in P)}）---")
         print(f"  3期間とも上: {up}個（偶然の期待 {exp_up:.1f}個）／"
               f"3期間とも下: {dn}個（期待 {exp_dn:.1f}個） → {verdict}")
         mp = monotonic_p(t, c)
