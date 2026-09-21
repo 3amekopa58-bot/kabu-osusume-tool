@@ -52,8 +52,13 @@ DOCUMENT_URL = "https://api.edinet-fsa.go.jp/api/v2/documents/{doc_id}"
 # 「主要な経営指標等の推移」は5期分なので 2017 と 2022 と 2026 で
 # 2013〜2026年度をカバーできる
 DEFAULT_YEARS = [2026, 2022, 2017]
-# 有報の提出は3月期決算なら5〜7月に集中する
-SEARCH_MONTHS = [(5, 1), (8, 15)]
+# 有報の提出は3月期決算なら5〜7月に集中する。
+# ⚠️ 2026-09-21: 5/1〜8/15 に限定していたため、**3月期以外の決算企業が
+#    丸ごと漏れていた**（2,667銘柄中1,332＝50%しか見つからなかった）。
+#    12月期なら3月提出、9月期なら12月提出になる。通年を走査する。
+#    `--fast` を付けると従来の5〜8月だけ（3月期企業の取り直し用）。
+SEARCH_MONTHS = [(1, 1), (12, 31)]
+SEARCH_MONTHS_FAST = [(5, 1), (8, 15)]
 DISCLOSURE_LAG_DAYS = 92
 
 # 会計基準によってタグが違うので候補を順に探す（日本基準/IFRS/米国基準）
@@ -120,8 +125,9 @@ def load_seccode_map(codes: list) -> dict:
 def find_docs(year: int, wanted: set, api_key: str) -> dict:
     """その年に提出された有価証券報告書のdocIDを、EDINETコード別に集める"""
     found = {}
-    d = dt.date(year, *SEARCH_MONTHS[0])
-    end = dt.date(year, *SEARCH_MONTHS[1])
+    months = SEARCH_MONTHS_FAST if "--fast" in sys.argv else SEARCH_MONTHS
+    d = dt.date(year, *months[0])
+    end = dt.date(year, *months[1])
     days = 0
     while d <= end:
         try:
