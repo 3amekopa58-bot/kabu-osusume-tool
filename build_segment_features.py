@@ -124,6 +124,15 @@ def main() -> None:
         h.index = pd.to_datetime(h.index).tz_localize(None)
         close = h["Close"]
         sma200 = close.rolling(200).mean()
+        # --- ボリンジャーバンド（20日・±2σ）---
+        # %B = バンド内のどこにいるか（0＝-2σ、0.5＝中心、1＝+2σ）
+        # バンド幅 = (上-下)÷中心。スクイーズ＝直近の幅が過去1年で何%の位置か
+        sma20 = close.rolling(20).mean()
+        sd20 = close.rolling(20).std()
+        bb_up, bb_lo = sma20 + 2 * sd20, sma20 - 2 * sd20
+        bb_pctb = (close - bb_lo) / (bb_up - bb_lo)
+        bb_width = (bb_up - bb_lo) / sma20 * 100
+        bb_squeeze = bb_width.rolling(245).rank(pct=True)   # 小さいほど収縮
         vol20 = close.pct_change().rolling(20).std() * 100
         tv20 = (close * h["Volume"]).rolling(20).mean() / 1e8
         fh = fund.get(code) or []
@@ -145,6 +154,9 @@ def main() -> None:
                 "売買代金億": float(tv20.loc[p]) if pd.notna(tv20.loc[p]) else np.nan,
                 "200日線乖離%": (px / float(sma200.loc[p]) - 1) * 100
                 if pd.notna(sma200.loc[p]) else np.nan,
+                "BB_%B": float(bb_pctb.loc[p]) if pd.notna(bb_pctb.loc[p]) else np.nan,
+                "BBバンド幅%": float(bb_width.loc[p]) if pd.notna(bb_width.loc[p]) else np.nan,
+                "BBスクイーズ": float(bb_squeeze.loc[p]) if pd.notna(bb_squeeze.loc[p]) else np.nan,
                 "1年騰落%": (px / float(close.loc[past[-245]]) - 1) * 100
                 if len(past) >= 245 else np.nan,
                 "時価総額億": px * shares / 1e8 if shares else np.nan,
@@ -162,7 +174,9 @@ def main() -> None:
     for col, name, q in [("時価総額億", "時価総額帯", 4), ("売買代金億", "売買代金帯", 4),
                          ("PBR", "PBR帯", 4), ("PER", "PER帯", 4),
                          ("ボラ%", "ボラ帯", 4), ("200日線乖離%", "200日線乖離帯", 4),
-                         ("1年騰落%", "1年騰落帯", 4)]:
+                         ("1年騰落%", "1年騰落帯", 4),
+                         ("BB_%B", "BB位置帯", 4), ("BBバンド幅%", "BB幅帯", 4),
+                         ("BBスクイーズ", "BB収縮帯", 4)]:
         try:
             f[name] = pd.qcut(f[col], q, labels=[f"{col}_Q{i+1}" for i in range(q)],
                               duplicates="drop")

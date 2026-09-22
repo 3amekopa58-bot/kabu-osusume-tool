@@ -226,7 +226,8 @@ def main() -> None:
     want = sys.argv[1] if len(sys.argv) > 1 else None
 
     cands = ["月", "曜日", "エントリー価格帯", "業種", "時価総額帯", "売買代金帯",
-             "PBR帯", "PER帯", "ボラ帯", "200日線乖離帯", "1年騰落帯", "相場環境"]
+             "PBR帯", "PER帯", "ボラ帯", "200日線乖離帯", "1年騰落帯", "相場環境",
+             "BB位置帯", "BB幅帯", "BB収縮帯"]
     cands = [c for c in cands if c in d.columns]
     if want:
         cands = [c for c in cands if c == want] or [want]
