@@ -41,5 +41,9 @@ jobs:
         with:
           name: recommendations-${{ github.run_id }}
           path: output/recommend_*.csv
+          # ⚠️ 2026-09-28: 90日だったため、蓄積開始(9/4)分が実運用照合の
+          #    予定(2026-12)と同時期に消える状態だった（4.4-78）。
+          #    GitHubの上限90日なので、これ以上は延ばせない。
+          #    **アーティファクトだけに頼らず data/live_picks/ に取り込む**。
           retention-days: 90
           if-no-files-found: warn

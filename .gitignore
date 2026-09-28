@@ -24,3 +24,8 @@ data/netnet_history.json
 
 # 自己株買いイベント（EDINET由来・再取得可能。直近1年しか遡れない）
 data/buyback_events.json
+
+# 実運用照合用の推奨CSV（GitHub Actionsのアーティファクトから取り込み）
+# ⚠️ jq_disc_date 等 J-Quants由来の列を含むため**コミット禁止**
+# （規約：取得したデータそのものを第三者が閲覧できる形にしない）
+data/live_picks/
