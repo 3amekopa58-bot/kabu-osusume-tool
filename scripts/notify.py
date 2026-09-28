@@ -514,10 +514,10 @@ def build_message() -> str:
     # 成績も最大ドローダウンも誤差の範囲で変わらなかった。
     # 「検証していないので当てはまらない」という以前の書き方は、
     # 測った今となっては不正確なので改めた
-    dup_note = ("\n※すでに持っている銘柄が再び出ることがあります"
-                "（実測で通知の約3割）。予算100万円なら買い増しても成績は"
-                "ほぼ変わらないと検証済み（株数の制約で増し玉自体が"
-                "ほとんど起きない）")
+    # ⚠️ 2026-09-28: 通知全体が ntfy の4,096バイトを超えると添付ファイルに
+    #    変換される（4.4-77）。説明は内容を保ったまま最小の文字数で書く。
+    dup_note = ("\n※保有中の銘柄が再び出ることがあります（約3割）。"
+                "予算100万円なら買い増しても成績はほぼ変わらないと検証済み")
 
     footer = (
         f"※利確目安は銘柄ごとのATR×{ATR_MULTIPLE:.0f}（値動きの荒さ）から算出。"
@@ -527,16 +527,58 @@ def build_message() -> str:
         # 伝わるよう中央値を併記する
         f"期待値+{EXPECTED_PCT:.1f}%は◆本命の条件で検証した値"
         f"（中央値+{MEDIAN_PCT:.1f}%。平均は少数の大勝ちに引っ張られる）"
-        f"\n※これは取引コスト控除前。往復コスト約{COST_MEDIAN_PCT:.1f}%"
-        f"（スプレッド＋板の薄さ）を引くと平均+{NET_EXPECTED_PCT:.1f}%・"
-        f"中央値+{NET_MEDIAN_PCT:.2f}%＝**典型的な1回はほぼ±0**。"
-        f"利益は少数の大勝ちに依存する"
+        # ⚠️ 2026-09-28: ここを4行で書いたら通知が4,227バイトになり、
+        #    ntfyの上限4,096を超えて**添付ファイルに変換された**（4.4-77）。
+        #    伝えるべき内容は落とさず、最小の文字数にする。
+        f"\n※コスト控除後は平均+{NET_EXPECTED_PCT:.1f}%・"
+        f"中央値+{NET_MEDIAN_PCT:.2f}%（典型的な1回はほぼ±0）"
     )
     if cand and not bool(cand[0].get("cond_regime", True)):
         footer += "\n⚠️日経がレンジ相場（ADX20未満）。この局面は過去の成績が落ちるため慎重に"
     footer += dup_note + dip_note
 
-    return "\n\n".join(["本日のおすすめ（すべて現物買い）"] + parts + [footer])
+    msg = "\n\n".join(["本日のおすすめ（すべて現物買い）"] + parts + [footer])
+    return fit_to_ntfy(msg)
+
+
+# ntfy は本文が 4,096バイトを超えると**テキストファイルの添付に変換する**。
+# 2026-09-28、注記を足して4,227バイトになり実際にそうなった（4.4-77）。
+# 余裕を見た上限を持ち、超えたら「末尾の説明から順に落とす」。
+# 銘柄の情報（売買に必要な数字）は最後まで残す。
+# 4,096ちょうどだと余裕がないので少しだけ下げる。ここを下げすぎると
+# 収まっている通知からも説明を削ってしまう（3900にして実際に起きた）。
+NTFY_MAX_BYTES = 4050
+
+
+def fit_to_ntfy(msg: str) -> str:
+    """ntfyが添付ファイルに変換しない長さまで、末尾の説明から削る。"""
+    if len(msg.encode("utf-8")) <= NTFY_MAX_BYTES:
+        return msg
+    # 末尾の説明（※で始まる行）を後ろから落とす。銘柄情報は消さない
+    lines = msg.split("\n")
+    while len(("\n".join(lines)).encode("utf-8")) > NTFY_MAX_BYTES:
+        drop = None
+        for i in range(len(lines) - 1, -1, -1):
+            t = lines[i].lstrip("　 ")
+            if t.startswith("※") or t.startswith("⚠️"):
+                drop = i
+                break
+        if drop is None:
+            break
+        del lines[drop]
+    out = "\n".join(lines)
+    if len(out.encode("utf-8")) > NTFY_MAX_BYTES:
+        # それでも収まらないときだけ切る。行の途中で切らない
+        keep = []
+        n = 0
+        for ln in out.split("\n"):
+            b = len(ln.encode("utf-8")) + 1
+            if n + b > NTFY_MAX_BYTES - 60:
+                break
+            keep.append(ln)
+            n += b
+        out = "\n".join(keep) + "\n※長いため以降を省略しました"
+    return out
 
 
 def main():
