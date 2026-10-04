@@ -29,3 +29,4 @@ data/buyback_events.json
 # ⚠️ jq_disc_date 等 J-Quants由来の列を含むため**コミット禁止**
 # （規約：取得したデータそのものを第三者が閲覧できる形にしない）
 data/live_picks/
+asp/public/
