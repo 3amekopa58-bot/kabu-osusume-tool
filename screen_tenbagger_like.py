@@ -36,6 +36,7 @@ import yfinance as yf
 B = Path(__file__).resolve().parent
 TICKERS = B / "data" / "all_listed_tickers.json"
 FIN = B / "data" / "edinet_financials.json"
+SPLITS = B / "data" / "splits.json"
 JQ = B / "data" / "jquants_summary.json"
 OUT = B / "output" / "tenbagger_like.csv"
 
@@ -44,6 +45,24 @@ BUDGET = 1_000_000
 # 10倍株が上昇前に持っていた値（analyze_tenbagger_profile.py fund の実測中央値）
 TARGET = {"時価総額億": 104.8, "PBR": 0.15, "PER": 4.24, "売買代金": 0.36}
 BATCH, WAIT = 100, 1.0
+
+
+def load_splits() -> dict:
+    if not SPLITS.exists():
+        print("⚠️ data/splits.json が無い。先に scripts/build_splits.py を実行")
+        return {}
+    raw = json.loads(SPLITS.read_text(encoding="utf-8"))["data"]
+    return {c: sorted((pd.Timestamp(d), float(r)) for d, r in v.items())
+            for c, v in raw.items() if v}
+
+
+def split_factor_after(splits: dict, code: str, when: pd.Timestamp) -> float:
+    """when より後の分割の累積倍率。当時の株式数 × これ = 現在株式数。"""
+    f = 1.0
+    for d, r in splits.get(code, []):
+        if d > when:
+            f *= r
+    return f
 
 
 def load_fin() -> dict:
@@ -100,7 +119,8 @@ def main() -> None:
     codes = [t["code"] for t in tick]
     names = {t["code"]: t["name"] for t in tick}
     fin = load_fin()
-    print(f"全上場{len(codes)}銘柄 / 財務のある銘柄 {len(fin)}")
+    splits = load_splits()
+    print(f"全上場{len(codes)}銘柄 / 財務のある銘柄 {len(fin)} / 分割履歴 {len(splits)}銘柄")
     print("⚠️ 予測ではない。基準率は窓あたり0.2〜1.3%＝大半は10倍にならない\n")
 
     rows, no_fin = [], 0
@@ -125,19 +145,26 @@ def main() -> None:
                 if not f:
                     no_fin += 1
                     continue
-                bps, eps, sh = f.get("bps"), f.get("eps"), f.get("shares")
-                if not bps or bps <= 0 or not sh:
+                sh = f.get("shares")
+                na, ni = f.get("net_assets"), f.get("net_income")
+                if not sh or not na or na <= 0:
                     continue
-                pbr = px / bps
-                per = px / eps if eps and eps > 0 else None
-                cap = px * sh / 1e8
+                # ⚠️ 1株当たりの値（BPS/EPS）で割ると、有報より後に分割した
+                #    銘柄が分割倍率のぶん割安に見える（4.4-80。2026-10-21に
+                #    134銘柄中22銘柄で実害。大成温調はPBR0.25→実際1.00）。
+                #    当時の株式数を現在株式数に直し、合計値で比べる。
+                pe = pd.Timestamp(f["period_end"]) if f.get("period_end") else pd.Timestamp.now()
+                sf = split_factor_after(splits, c, pe)
+                cap_yen = px * sh * sf
+                cap = cap_yen / 1e8
+                pbr = cap_yen / na
+                per = cap_yen / ni if ni and ni > 0 else None
                 if pbr > MAX_PBR or cap > MAX_CAP_OKU:
                     continue
                 if per is not None and per > MAX_PER:
                     continue
                 if per is None:      # 赤字＝PERが出ない。10倍株にも多いので残す
                     pass
-                ni, na = f.get("net_income"), f.get("net_assets")
                 rev, oi = f.get("revenue"), f.get("ordinary_income")
                 v60 = float(x["Volume"].tail(60).mean())
                 vp = float(x["Volume"].iloc[-260:-60].mean())
@@ -154,7 +181,7 @@ def main() -> None:
                     "高値からの下落%": round((px / hi - 1) * 100, 1),
                     "出来高比": round(v60 / vp, 2) if vp else None,
                     "1年騰落%": round((px / float(x["Close"].iloc[-245]) - 1) * 100, 1),
-                    "決算期": f.get("period_end"),
+                    "決算期": f.get("period_end"), "分割倍率": round(sf, 2),
                 })
             except Exception:
                 pass

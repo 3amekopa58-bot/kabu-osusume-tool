@@ -2,7 +2,15 @@
 
 ⚠️ 後知恵の排除:
    ・**株価の水準は使わない**（分割調整で「昔安い＝その後分割＝上がった」。4.4-49）
-   ・時価総額は 調整後株価×現在株式数 で復元（分割が打ち消し合う。4.4-50）
+   ・⚠️ 2026-10-21に重大な誤りを修正（4.4-80）。以前は
+     「時価総額＝調整後株価×**当時の**株式数」「PBR＝調整後株価÷当時のBPS」
+     としていた。yfinanceの株価は分割調整済みなので、**その後分割した銘柄**
+     （＝上がった銘柄）が分割倍率のぶん小型・割安に見えていた。
+     docstringには正しい方法を書きながら実装していなかった。
+   ・正しい方法＝**1株当たりの値を使わず合計値で比べる**：
+       現在株式数 = 当時の株式数 × その後の分割倍率
+       時価総額 = 調整後株価 × 現在株式数（分割が打ち消し合う）
+       PBR = 時価総額 ÷ 純資産 ／ PER = 時価総額 ÷ 純利益
    ・財務は `available_from`（実開示日。4.4-69）以降のものだけ
    ・特徴は**窓の開始時点**で測り、**その窓の騰落**を見る
 
@@ -24,6 +32,7 @@ import pandas as pd
 from price_cache import fetch_histories
 
 B = Path(__file__).resolve().parent
+SPLITS = B / "data" / "splits.json"
 # 重複しない5年窓。各窓の開始時点の姿 → その窓の騰落
 WINDOWS = [("W1 2006-2010", "2006-01-01", "2010-12-31"),
            ("W2 2011-2015", "2011-01-01", "2015-12-31"),
@@ -38,6 +47,25 @@ MIN_PRE_DAYS = 250      # 開始時点までに必要な履歴
 WINDOWS_FUND = [("F1 2014-2017", "2014-01-01", "2017-12-31"),
                 ("F2 2018-2021", "2018-01-01", "2021-12-31"),
                 ("F3 2022-2026", "2022-01-01", "2026-08-31")]
+
+
+def load_splits() -> dict:
+    """{銘柄: [(日付, 倍率)...]}。scripts/build_splits.py が作る。"""
+    if not SPLITS.exists():
+        print("⚠️ data/splits.json が無い。先に scripts/build_splits.py を実行")
+        return {}
+    raw = json.loads(SPLITS.read_text(encoding="utf-8"))["data"]
+    return {c: sorted((pd.Timestamp(d), float(r)) for d, r in v.items())
+            for c, v in raw.items() if v}
+
+
+def split_factor_after(splits: dict, code: str, when: pd.Timestamp) -> float:
+    """when より後に起きた分割の累積倍率。当時の株式数 × これ = 現在株式数。"""
+    f = 1.0
+    for d, r in splits.get(code, []):
+        if d > when:
+            f *= r
+    return f
 
 
 def load_fundamentals() -> tuple:
@@ -87,7 +115,8 @@ def main() -> None:
     print(f"{len(codes)}銘柄の株価を用意中…")
     hist = fetch_histories(codes, period="max")
     fin, disc = load_fundamentals()
-    print(f"財務のある銘柄 {len(fin)}\n")
+    splits = load_splits()
+    print(f"財務のある銘柄 {len(fin)} / 分割履歴のある銘柄 {len(splits)}\n")
 
     rows = []
     for wlab, ws, we in WINDOWS:
@@ -127,12 +156,18 @@ def main() -> None:
             fh = fin_asof(fin.get(code), ws_t, disc, code)
             if fh:
                 f0 = fh[-1]
-                bps, eps, sh = f0.get("bps"), f0.get("eps"), f0.get("shares")
-                r["時価総額億"] = px * sh / 1e8 if sh else np.nan
-                r["PBR"] = px / bps if bps and bps > 0 else np.nan
-                r["PER"] = px / eps if eps and eps > 0 else np.nan
+                sh = f0.get("shares")
                 ni, na = f0.get("net_income"), f0.get("net_assets")
                 rev, oi = f0.get("revenue"), f0.get("ordinary_income")
+                # ⚠️ 1株当たりの値では分割の後知恵が入る（4.4-80）。
+                #    当時の株式数に「その後の分割倍率」を掛けて現在株式数に直し、
+                #    時価総額（合計値）を作ってから純資産・純利益と比べる。
+                pe = pd.Timestamp(f0["period_end"]) if f0.get("period_end") else ws_t
+                sf = split_factor_after(splits, code, pe)
+                cap = px * sh * sf if sh else np.nan
+                r["時価総額億"] = cap / 1e8 if cap == cap else np.nan
+                r["PBR"] = cap / na if cap == cap and na and na > 0 else np.nan
+                r["PER"] = cap / ni if cap == cap and ni and ni > 0 else np.nan
                 r["ROE%"] = ni / na * 100 if ni and na and na > 0 else np.nan
                 r["経常利益率%"] = oi / rev * 100 if oi and rev and rev > 0 else np.nan
                 if len(fh) >= 2:
